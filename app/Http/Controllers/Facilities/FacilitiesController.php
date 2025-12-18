@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Facilities;
 
+use App\Events\TicketCreated;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Facilities\WorkOrderFacilities; // Pastikan namespace ini benar sesuai folder Anda
@@ -12,6 +13,7 @@ use App\Models\Engineering\Machine;
 use App\Models\FacilityTech; // Model Teknisi Facility
 use Maatwebsite\Excel\Facades\Excel; // PENTING: Import Excel
 use App\Exports\FacilitiesExport;      // PENTING: Import Class Export tadi
+use Illuminate\Support\Str;
 
 class FacilitiesController extends Controller
 {
@@ -99,7 +101,7 @@ class FacilitiesController extends Controller
             ->withQueryString(); // Agar filter tidak hilang saat ganti halaman
 
         // DATA PENDUKUNG VIEW
-        $plants = Plant::whereNotIn('name', ['SS', 'PE', 'QC FO', 'HC', 'GA', 'FA', 'IT', 'Sales', 'Marketing', 'RM Office', 'RM 1', 'RM 2', 'RM 3', 'RM 5', 'MT', 'FH', 'FO', 'QR'])->get();
+        $plants = Plant::whereNotIn('name', ['PE', 'QC FO', 'HC', 'GA', 'FA', 'IT', 'Sales', 'Marketing', 'RM Office', 'RM 1', 'RM 2', 'RM 3', 'RM 5', 'MT', 'FH', 'FO', 'QR', 'QC LAB', 'QC LV', 'QC MV', 'Autowire', 'Gudang Jadi', 'MC Cable', 'Konstruksi', 'Workshop Electric', 'Plant Tools'])->get();
         $machines = Machine::all();
         $technicians = FacilityTech::all();
         $pageIds = $workOrders->pluck('id')->toArray();
@@ -113,7 +115,11 @@ class FacilitiesController extends Controller
         $countPending = (clone $statsQuery)->where('status', 'pending')->count();
         $countProgress = (clone $statsQuery)->where('status', 'in_progress')->count();
         $countDone = (clone $statsQuery)->where('status', 'completed')->count();
-
+        $openTicket = null;
+        if ($request->has('open_ticket_id')) {
+            // Cari tiket spesifik untuk langsung dibuka di modal
+            $openTicket = \App\Models\Facilities\WorkOrderFacilities::with(['technicians', 'machine'])->find($request->open_ticket_id);
+        }
         return view('Division.Facilities.Index', compact(
             'workOrders',
             'plants',
@@ -123,46 +129,60 @@ class FacilitiesController extends Controller
             'countPending',
             'countProgress',
             'countDone',
-            'pageIds'
+            'pageIds',
+            'openTicket'
         ));
     }
 
     // --- DASHBOARD (ADMIN STATS) ---
     public function dashboard(Request $request)
     {
+        // 1. CEK ROLE
         if (!in_array(Auth::user()->role, ['fh.admin', 'super.admin'])) {
             abort(403);
         }
 
+        // 2. BASE QUERY
         $query = WorkOrderFacilities::where('status', '!=', 'cancelled');
 
-        // Allow filtering by month (format: YYYY-MM) for interactive dashboard
+        // 3. FILTER LOGIC
         $selectedMonth = null;
+
+        // Default Time Range untuk Visual Gantt (15 Hari "Brutal View")
+        // Kita set default H-7 sampai H+7 agar fokus ke pekerjaan sekarang.
+        $ganttStartDate = now()->subDays(7);
+        $ganttTotalDays = 15;
+
         if ($request->filled('month')) {
             $selectedMonth = $request->month;
             try {
-                $start = Carbon::createFromFormat('Y-m', $selectedMonth)->startOfMonth()->format('Y-m-d');
-                $end = Carbon::createFromFormat('Y-m', $selectedMonth)->endOfMonth()->format('Y-m-d');
-                $query->whereDate('created_at', '>=', $start)
-                    ->whereDate('created_at', '<=', $end);
+                $start = Carbon::createFromFormat('Y-m', $selectedMonth)->startOfMonth();
+                $end = Carbon::createFromFormat('Y-m', $selectedMonth)->endOfMonth();
+
+                $query->whereDate('created_at', '>=', $start)->whereDate('created_at', '<=', $end);
+
+                // Jika filter bulan aktif, Gantt chart mengikuti bulan tersebut
+                $ganttStartDate = $start;
+                $ganttTotalDays = $start->daysInMonth;
             } catch (\Exception $e) {
-                // ignore invalid month format
+                // ignore invalid
             }
         } elseif ($request->filled('start_date') && $request->filled('end_date')) {
             $query->whereDate('created_at', '>=', $request->start_date)
                 ->whereDate('created_at', '<=', $request->end_date);
         } else {
-            $query->take(50);
+            // Jika tidak ada filter, ambil 100 teratas agar tidak berat
+            $query->take(100);
         }
+
         $workOrders = $query->latest()->get();
 
-        // Counters
+        // 4. COUNTERS & CHARTS (LOGIKA LAMA TETAP DIPAKAI)
         $countTotal = $workOrders->count();
         $countPending = $workOrders->where('status', 'pending')->count();
         $countProgress = $workOrders->where('status', 'in_progress')->count();
         $countDone = $workOrders->where('status', 'completed')->count();
 
-        // Charts Logic
         $catData = $workOrders->groupBy('category')->map->count();
         $chartCatLabels = $catData->keys();
         $chartCatValues = $catData->values();
@@ -171,59 +191,79 @@ class FacilitiesController extends Controller
         $chartStatusLabels = $statusData->keys();
         $chartStatusValues = $statusData->values();
 
-        // Plant chart
         $plantData = $workOrders->groupBy('plant')->map->count();
         $chartPlantLabels = $plantData->keys();
         $chartPlantValues = $plantData->values();
 
-        // Completion percentage for selected period
         $periodTotal = $workOrders->count();
         $periodCompleted = $workOrders->where('status', 'completed')->count();
         $completionPct = $periodTotal ? round(($periodCompleted / $periodTotal) * 100, 1) : 0;
 
-        // Gantt Chart - prepare timeline data
-        $ganttData = [];
-        $ganttLabels = [];
-        $ganttColors = [];
+        // 5. GANTT CHART LOGIC (BARU: GROUPED & OPTIMIZED)
+        // Mengelompokkan tiket berdasarkan Kategori (Level 1)
+        $groupedGantt = $workOrders->groupBy('category')->map(function ($items, $category) {
 
-        foreach ($workOrders as $wo) {
-            $ganttLabels[] = $wo->ticket_num;
-            $start = $wo->created_at ? $wo->created_at->format('Y-m-d') : date('Y-m-d');
+            // Cari tanggal min/max dalam grup untuk keperluan logic (opsional)
+            $minStart = $items->min(fn($i) => $i->start_date ? Carbon::parse($i->start_date) : $i->created_at);
+            $maxEnd   = $items->max(fn($i) => $i->actual_completion_date ?? $i->target_completion_date);
 
-            if ($wo->status == 'completed' && $wo->actual_completion_date) {
-                $end = $wo->actual_completion_date;
-            } else {
-                $end = $wo->target_completion_date ?? date('Y-m-d');
-            }
-            if ($end < $start) $end = $start;
-            if ($end == $start) $end = Carbon::parse($end)->addDay()->format('Y-m-d');
+            // Cek apakah ada delay di grup ini
+            $hasDelay = $items->contains(function ($i) {
+                $target = $i->target_completion_date ? Carbon::parse($i->target_completion_date) : now();
+                return $i->status != 'completed' && $target->isPast();
+            });
 
-            // Calculate duration in days
-            $startDate = Carbon::parse($start);
-            $endDate = Carbon::parse($end);
-            $duration = $endDate->diffInDays($startDate) + 1;
+            return [
+                'id' => Str::slug($category ?? 'uncategorized'),
+                'name' => $category ?? 'Uncategorized',
+                'count' => $items->count(),
+                'start' => $minStart,
+                'end' => $maxEnd,
+                'has_delay' => $hasDelay,
+                'items' => $items->map(function ($wo) {
+                    // Tentukan Tanggal Mulai & Selesai Item
+                    $start = $wo->start_date ? Carbon::parse($wo->start_date) : $wo->created_at;
 
-            $ganttData[] = [
-                'ticket' => $wo->ticket_num,
-                'status' => $wo->status,
-                'start' => $start,
-                'end' => $end,
-                'duration' => max($duration, 1),
-                'plant' => $wo->plant ?? '-',
-                'machine_name' => $wo->machine_name ?? '-',
-                'category' => $wo->category ?? '-'
+                    if ($wo->status == 'completed' && $wo->actual_completion_date) {
+                        $end = Carbon::parse($wo->actual_completion_date);
+                    } else {
+                        $end = $wo->target_completion_date ? Carbon::parse($wo->target_completion_date) : now();
+                    }
+
+                    // Jika end < start, paksa sama (durasi 1 hari)
+                    if ($end->lt($start)) $end = $start->copy();
+
+                    // Logic Warna Status (Visual Waras)
+                    $statusColor = match ($wo->status) {
+                        'completed' => 'bg-emerald-500',
+                        'in_progress' => 'bg-blue-500',
+                        'pending' => 'bg-slate-400',
+                        'cancelled' => 'bg-slate-200',
+                        default => 'bg-slate-300'
+                    };
+
+                    // Override Merah jika Delay
+                    $isDelayed = false;
+                    if ($wo->status != 'completed' && $end->isPast()) {
+                        $statusColor = 'bg-rose-500';
+                        $isDelayed = true;
+                    }
+
+                    return [
+                        'id' => $wo->id,
+                        'ticket' => $wo->ticket_num,
+                        'desc' => $wo->description,
+                        'start' => $start,
+                        'end' => $end,
+                        'color' => $statusColor,
+                        'is_delayed' => $isDelayed,
+                        'pic' => $wo->technicians->pluck('name')->join(', '), // Ambil nama teknisi
+                    ];
+                })->values() // Reset array keys setelah map
             ];
+        });
 
-            if ($wo->status == 'completed') $ganttColors[] = '#10B981'; // green
-            elseif ($wo->status == 'in_progress') $ganttColors[] = '#2563EB'; // blue
-            else $ganttColors[] = '#F59E0B'; // yellow
-        }
-
-        $minDate = $workOrders->min('created_at');
-        $startDateFilename = $minDate ? $minDate->format('Y-m-d') : date('Y-m-d');
-        $startDateHeader = $minDate ? $minDate->translatedFormat('d F Y') : date('d F Y');
-
-        // Technician PIC chart: count how many WOs each tech is assigned to
+        // 6. TECH CHART LOGIC (KEEP EXISTING)
         $techData = [];
         foreach ($workOrders as $wo) {
             if ($wo->technicians && $wo->technicians->count() > 0) {
@@ -235,7 +275,7 @@ class FacilitiesController extends Controller
                 }
             }
         }
-        arsort($techData); // Sort descending by count
+        arsort($techData);
         $chartTechLabels = collect($techData)->keys();
         $chartTechValues = collect($techData)->values();
 
@@ -253,13 +293,12 @@ class FacilitiesController extends Controller
             'chartPlantValues',
             'chartTechLabels',
             'chartTechValues',
-            'ganttLabels',
-            'ganttData',
-            'ganttColors',
-            'startDateFilename',
-            'startDateHeader',
             'completionPct',
-            'selectedMonth'
+            'selectedMonth',
+            // Variable Baru untuk Gantt Chart "Brutal"
+            'groupedGantt',
+            'ganttStartDate', // Variable nama baru untuk view ($startDate)
+            'ganttTotalDays'  // Variable nama baru untuk view ($totalDays)
         ));
     }
 
@@ -299,7 +338,29 @@ class FacilitiesController extends Controller
         // ... (Sisa kode ke bawah sama seperti sebelumnya) ...
 
         // 3. Generate Ticket Number
-        $dateCode = date('Ymd');
+        $bulanIndo = [
+            '01' => 'JAN',
+            '02' => 'FEB',
+            '03' => 'MAR',
+            '04' => 'APR',
+            '05' => 'MEI',
+            '06' => 'JUN',
+            '07' => 'JUL',
+            '08' => 'AGU', // Agustus biasanya disingkat AGU atau AGS
+            '09' => 'SEP',
+            '10' => 'OKT', // October jadi OKT
+            '11' => 'NOV',
+            '12' => 'DES'  // December jadi DES
+        ];
+
+        // 2. Ambil komponen tanggal saat ini
+        $hari  = date('d'); // 18
+        $bulan = date('m'); // 12
+        $tahun = date('y'); // 25
+
+        // 3. Susun kodenya
+        // Hasil: 18DES25
+        $dateCode = $hari . $bulanIndo[$bulan] . $tahun;
         $prefix = 'FAC-' . $dateCode . '-';
         $lastTicket = WorkOrderFacilities::where('ticket_num', 'like', $prefix . '%')->orderBy('id', 'desc')->first();
         $newSeq = $lastTicket ? ((int)substr($lastTicket->ticket_num, -3) + 1) : 1;
@@ -330,7 +391,7 @@ class FacilitiesController extends Controller
             }
         }
 
-        WorkOrderFacilities::create([
+        $wo = WorkOrderFacilities::create([
             'ticket_num' => $ticketNum,
             'requester_id' => Auth::id(),
             'requester_name' => $request->requester_name,
@@ -347,7 +408,8 @@ class FacilitiesController extends Controller
             'photo_path' => $photoPath,
             'status' => 'pending'
         ]);
-
+        // $wo   = WorkOrderFacilities::create($data);
+        event(new TicketCreated($wo));
         return redirect()->route('fh.index')->with('success', 'Request Created Successfully!');
     }
 
@@ -358,47 +420,67 @@ class FacilitiesController extends Controller
     {
         $wo = WorkOrderFacilities::findOrFail($id);
 
-        // 1. UPDATE STATUS UTAMA
+        // --- 1. VALIDASI INPUT ---
+        // Kita validasi dulu sebelum memproses data
+        $rules = [
+            'status' => 'required|in:pending,in_progress,completed,cancelled',
+            'facility_tech_ids' => 'nullable', // Bisa array atau string
+        ];
+
+        // ATURAN KHUSUS: Jika status Completed, Tanggal Selesai (Actual) WAJIB diisi
+        if ($request->status === 'completed') {
+            $rules['actual_completion_date'] = 'required|date';
+        }
+
+        $request->validate($rules);
+
+        // --- 2. UPDATE STATUS ---
         $wo->status = $request->status;
 
-        // 2. SIMPAN TEKNISI (MULTIPLE)
-        // Pastikan kita mengambil input sebagai array
+        // --- 3. LOGIKA TANGGAL (PENTING) ---
+        if ($request->status === 'completed') {
+            // AMBIL DARI INPUT MANUAL USER (Sesuai request Anda)
+            $wo->actual_completion_date = $request->actual_completion_date;
+        } elseif ($request->status === 'in_progress') {
+            // Logic Start Date:
+            // 1. Jika user input tanggal mulai manual, pakai itu.
+            // 2. Jika tidak input manual DAN di database masih kosong, isi otomatis hari ini.
+            if ($request->filled('start_date')) {
+                $wo->start_date = $request->start_date;
+            } elseif (is_null($wo->start_date)) {
+                $wo->start_date = now();
+            }
+
+            // Reset tanggal selesai jika status dikembalikan ke in_progress
+            $wo->actual_completion_date = null;
+        } else {
+            // Jika status Pending/Cancelled, reset tanggal selesai
+            $wo->actual_completion_date = null;
+        }
+
+        // --- 4. SIMPAN TEKNISI (MULTIPLE) ---
         $ids = $request->input('facility_tech_ids', []);
 
-        // Jika entah kenapa inputnya string "1,2", kita pecah
+        // Handling jika input berupa string "1,2" (kadang terjadi pada form multipart)
         if (!is_array($ids)) {
             $ids = explode(',', (string)$ids);
         }
 
-        // Filter: Hapus nilai kosong/null & pastikan angka
+        // Filter angka valid saja
         $ids = array_filter($ids, function ($value) {
             return is_numeric($value) && $value > 0;
         });
 
-        // Debugging (Cek di Laravel Log jika masih error)
-        \Log::info('Saving Techs for WO #' . $id, ['ids' => $ids]);
-
-        // Simpan ke Pivot Table (Sync)
         $wo->technicians()->sync($ids);
 
-        // 3. UPDATE TANGGAL (Auto-fill)
-        if ($request->filled('start_date')) {
-            $wo->start_date = $request->start_date;
-        }
-
-        if ($request->status == 'completed') {
-            $wo->actual_completion_date = $wo->actual_completion_date ?? now();
-        } elseif ($request->status != 'completed') {
-            $wo->actual_completion_date = null;
-        }
-
-        // 4. CATAT PEMROSES
+        // --- 5. CATAT PEMROSES (Jika belum ada) ---
         if (!$wo->processed_by) {
             $wo->processed_by = Auth::id();
             $wo->processed_by_name = Auth::user()->name;
         }
 
         $wo->save();
+
         return redirect()->back()->with('success', 'Status updated successfully!');
     }
 }

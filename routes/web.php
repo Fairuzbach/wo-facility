@@ -4,6 +4,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Engineering\WorkOrderEngineeringController;
 use App\Http\Controllers\GeneralAffair\GeneralAffairController;
 use App\Http\Controllers\Facilities\FacilitiesController;
+use App\Http\Controllers\NotificationController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -89,6 +90,10 @@ Route::middleware('auth')->group(function () {
         //Update status (admin edit) -> route(fh.updateStatus)
         //URL: /facilities/{id}/update-status
         Route::put('/{id}/update-status', [FacilitiesController::class, 'updateStatus'])->name('update-status');
+    });
+    Route::middleware(['auth'])->group(function () {
+        Route::get('/notifications/{id}/read', [NotificationController::class, 'markAsRead'])->name('notifications.read');
+        Route::get('/notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.readAll');
     });
 });
 
