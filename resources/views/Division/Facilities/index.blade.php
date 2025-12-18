@@ -23,16 +23,25 @@
 
     {{-- LIBRARIES --}}
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+
+    {{-- Memuat CSS & JS dari Vite --}}
     @vite(['resources/css/facilities.css', 'resources/js/facilities.js'])
+
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
+    {{-- CONFIGURATION DATA --}}
     <script>
+        // Menggabungkan definisi window variable agar rapi
         window.facilitiesConfig = {
             machines: @json($machines),
             technicians: @json($technicians),
             pageIds: @json($pageIds),
             openTicket: @json($openTicket ?? null)
+        };
+
+        window.routes = {
+            export: "{{ route('fh.index') }}" // Gunakan index dengan parameter export=true
         };
     </script>
 
