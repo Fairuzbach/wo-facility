@@ -23,6 +23,7 @@ class PlantSeeder extends Seeder
             'Plant F',
             'SS',
             'SC',
+            'Planning'
         ];
 
         foreach ($locations as $loc) {
