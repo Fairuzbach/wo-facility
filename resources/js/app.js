@@ -1,4 +1,6 @@
 import './bootstrap';
+import './facilities'
+import './dashboard'
 
 import Alpine from 'alpinejs';
 
