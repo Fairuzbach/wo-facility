@@ -18,7 +18,7 @@
                                 d="M6 18L18 6M6 6l12 12"></path>
                         </svg></button>
                 </div>
-                <form action="{{ route('fh.store') }}" method="POST" enctype="multipart/form-data">
+                <form @submit.prevent="submitToApi()" enctype="multipart/form-data">
                     @csrf
                     <div class="p-8 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
                         {{-- Form Content sama seperti sebelumnya tapi class rounded-xl --}}
@@ -63,7 +63,7 @@
                                     <option value="Pemasangan Mesin">Pemasangan Mesin</option>
                                     <option value="Pembongkaran Mesin">Pembongkaran Mesin</option>
                                     <option value="Relokasi Mesin">Relokasi Mesin</option>
-                                    <option value="Perbaikan">Perbaikan</option>
+                                    <option value="Perbaikan Mesin">Perbaikan Mesin</option>
                                     <option value="Pembuatan Alat Baru">Pembuatan Alat Baru</option>
                                     <option value="Rakit Steel Drum">Rakit Steel Drum</option>
                                     <option value="Lain-Lain">Lain-Lain</option>

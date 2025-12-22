@@ -73,7 +73,18 @@
                             <option value="cancelled">Cancelled</option>
                         </select>
                     </div>
+                    <div x-show="editForm.status === 'completed'" x-transition:enter="transition ease-out duration-300"
+                        x-transition:enter-start="opacity-0 transform -translate-y-2"
+                        x-transition:enter-end="opacity-100 transform translate-y-0"
+                        class="mb-4 bg-green-50 p-4 rounded-xl border border-green-100">
 
+                        <label class="block text-sm font-semibold text-green-800 mb-1">
+                            Catatan Penyelesaian <span class="text-green-600 font-normal">(Opsional)</span>
+                        </label>
+
+                        <textarea x-model="editForm.note" rows="3" placeholder="Contoh: Mesin sudah diganti bearing baru..."
+                            class="w-full rounded-xl border-green-200 focus:border-green-500 focus:ring-green-500 text-sm"></textarea>
+                    </div>
                     {{-- Dates --}}
                     <div x-show="editForm.status == 'in_progress' || editForm.status == 'completed'" x-transition>
                         <label class="block text-sm font-bold text-slate-700 mb-2">Tanggal Mulai</label>
@@ -89,7 +100,7 @@
                             placeholder="YYYY-MM-DD" :required="editForm.status == 'completed'">
                     </div>
 
-                    <button type="submit"
+                    <button type="submit" @click="submitUpdateStatus()"
                         class="w-full py-3.5 bg-gradient-to-br from-[#1E3A5F] to-[#2d5285] text-white rounded-xl font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition transform">Save
                         Changes</button>
                 </form>

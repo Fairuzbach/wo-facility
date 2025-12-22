@@ -1,5 +1,20 @@
 @section('browser_title', 'Facilities Work Order')
 
+{{-- 1. LOGIKA TOKEN AMAN (PHP) --}}
+@php
+    $apiToken = '';
+    // Cek apakah user login DAN user object-nya ada
+    if (Auth::check() && Auth::user()) {
+        $apiToken = Auth::user()->createToken('web-access')->plainTextToken;
+    }
+@endphp
+
+<script>
+    // Gunakan variable $apiToken yang sudah aman dari PHP di atas
+    const API_TOKEN = "{{ $apiToken }}";
+    const API_URL = "{{ url('/api/facility-wo') }}"; // Typo fixed: apai -> api
+</script>
+
 <x-app-layout>
     {{-- HEADER --}}
     <x-slot name="header">
@@ -24,16 +39,12 @@
     {{-- LIBRARIES --}}
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 
-    {{-- Memuat CSS & JS dari Vite --}}
-    @vite(['resources/css/facilities.css', 'resources/js/facilities.js'])
-
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-    {{-- CONFIGURATION DATA --}}
     <script>
-        // Menggabungkan definisi window variable agar rapi
         window.facilitiesConfig = {
+            isLoggedIn: {{ Auth::check() ? 'true' : 'false' }},
+
+            apiToken: "{{ $apiToken }}",
+            apiUrl: "{{ url('/api/facility-wo') }}",
             machines: @json($machines),
             technicians: @json($technicians),
             pageIds: @json($pageIds),
@@ -41,12 +52,21 @@
         };
 
         window.routes = {
-            export: "{{ route('fh.index') }}" // Gunakan index dengan parameter export=true
+            export: "{{ route('fh.index') }}"
         };
     </script>
 
+    @vite(['resources/css/facilities.css', 'resources/js/facilities.js'])
+
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
     {{-- MAIN CONTENT --}}
-    <div class="py-8 bg-[#F8FAFC] min-h-screen font-sans"x-data="facilitiesData">
+    {{-- Gunakan variable $apiToken disini juga --}}
+    <div class="py-8 bg-[#F8FAFC] min-h-screen font-sans" x-data="facilitiesData({
+        isLogged: {{ Auth::check() ? 'true' : 'false' }},
+        token: '{{ $apiToken }}'
+    })">
 
         {{-- ALERT --}}
         @if (session('success'))
@@ -69,22 +89,22 @@
 
         <div class="max-w-[95rem] mx-auto sm:px-6 lg:px-8 space-y-8">
             {{-- 1. STATS OVERVIEW --}}
-            <x-facilities.stats-card :countTotal="$countTotal" :countPending="$countPending" :countProgress="$countProgress" :countDone="$countDone" />
+            <x-index.stats-card :countTotal="$countTotal" :countPending="$countPending" :countProgress="$countProgress" :countDone="$countDone" />
 
             {{-- 2. TOOLBAR --}}
-            <x-facilities.toolbar :plants="$plants" />
+            <x-index.toolbar :plants="$plants" />
 
             {{-- 3. TABLE DATA  --}}
-            <x-facilities.table-data :workOrders="$workOrders" />
+            <x-index.table-data :workOrders="$workOrders" />
         </div>
 
         {{-- MODAL CREATE  --}}
-        <x-facilities.modal-create :plants="$plants" />
+        <x-index.modal-create :plants="$plants" />
 
         {{-- MODAL EDIT / UPDATE --}}
-        <x-facilities.modal-edit />
+        <x-index.modal-edit />
 
         {{-- MODAL DETAIL (VIEW) --}}
-        <x-facilities.modal-detail />
+        <x-index.modal-detail />
     </div>
 </x-app-layout>

@@ -2,18 +2,26 @@
 
 namespace App\Http\Controllers\Facilities;
 
-use App\Events\TicketCreated;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Facilities\WorkOrderFacilities; // Pastikan namespace ini benar sesuai folder Anda
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str; // Tambahan untuk Str::slug / Str::random
 use Carbon\Carbon;
+use App\Exports\FacilitiesExport; // Pastikan ini ada jika pakai Excel
+use Maatwebsite\Excel\Facades\Excel; // Pastikan ini ada jika pakai Excel
+
+// --- IMPORT MODEL DI SINI (DI LUAR CLASS) ---
+use App\Models\User;
+use App\Models\Facilities\WorkOrderFacilities;
 use App\Models\Engineering\Plant;
 use App\Models\Engineering\Machine;
-use App\Models\FacilityTech; // Model Teknisi Facility
-use Maatwebsite\Excel\Facades\Excel; // PENTING: Import Excel
-use App\Exports\FacilitiesExport;      // PENTING: Import Class Export tadi
-use Illuminate\Support\Str;
+use App\Models\FacilityTech; // Tambahkan jika perlu
+
+// --- IMPORT NOTIFIKASI DI SINI ---
+use App\Notifications\NewTicketCreated;
+use App\Notifications\TicketStatusNotification; // Pastikan file ini ada
 
 class FacilitiesController extends Controller
 {
@@ -23,7 +31,7 @@ class FacilitiesController extends Controller
         $user = Auth::user();
 
         // Logic Admin: Hanya 'fh.admin' dan 'super.admin' yang bisa lihat semua
-        if ($user->role !== 'fh.admin' && $user->role !== 'super.admin') {
+        if ($user && $user->role !== 'fh.admin' && $user->role !== 'super.admin') {
             $query->where('requester_id', $user->id);
         }
 
@@ -33,7 +41,8 @@ class FacilitiesController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('ticket_num', 'like', "%{$search}%")
                     ->orWhere('description', 'like', "%{$search}%")
-                    ->orWhere('plant', 'like', "%{$search}%");
+                    ->orWhere('plant', 'like', "%{$search}%")
+                    ->orWhere('status', 'like', "%{$search}%");
             });
         }
 
@@ -45,7 +54,6 @@ class FacilitiesController extends Controller
         if ($request->filled('start_date')) $query->whereDate('created_at', '>=', $request->start_date);
         if ($request->filled('end_date')) $query->whereDate('created_at', '<=', $request->end_date);
 
-        // Eager Load 'facilityTech' jika relasi sudah dibuat di model WorkOrderFacilities
         return $query->with(['user', 'technicians', 'machine'])->latest();
     }
 
@@ -67,7 +75,7 @@ class FacilitiesController extends Controller
             });
         }
 
-        // 3. FILTER DROPDOWN (Category, Status, Plant)
+        // 3. FILTER DROPDOWN
         if ($request->filled('status')) $query->where('status', $request->status);
         if ($request->filled('category')) $query->where('category', $request->category);
         if ($request->filled('plant_id')) {
@@ -76,21 +84,20 @@ class FacilitiesController extends Controller
         }
 
         // Permission Check
-        if ($user->role !== 'fh.admin' && $user->role !== 'super.admin') {
-            $query->where('requester_id', $user->id);
+        if ($user) {
+            if ($user->role !== 'fh.admin' && $user->role !== 'super.admin') {
+                $query->where('requester_id', $user->id);
+            }
         }
 
         // 4. LOGIKA EXPORT XLSX
         if ($request->has('export') && $request->export == 'true') {
-            // Jika user memilih checkbox tertentu
             if ($request->filled('selected_ids')) {
                 $ids = explode(',', $request->selected_ids);
                 $exportData = WorkOrderFacilities::with(['technicians', 'machine'])->whereIn('id', $ids)->get();
             } else {
-                // Jika tidak, export semua hasil filter saat ini
                 $exportData = $query->with(['technicians', 'machine'])->get();
             }
-
             return Excel::download(new FacilitiesExport($exportData), 'facilities_report_' . date('Ymd_His') . '.xlsx');
         }
 
@@ -98,27 +105,27 @@ class FacilitiesController extends Controller
         $workOrders = $query->with(['user', 'technicians', 'machine'])
             ->latest()
             ->paginate(10)
-            ->withQueryString(); // Agar filter tidak hilang saat ganti halaman
+            ->withQueryString();
 
         // DATA PENDUKUNG VIEW
-        $plants = Plant::whereNotIn('name', ['PE', 'QC FO', 'HC', 'GA', 'FA', 'IT', 'Sales', 'Marketing', 'RM Office', 'RM 1', 'RM 2', 'RM 3', 'RM 5', 'MT', 'FH', 'FO', 'QR', 'QC LAB', 'QC LV', 'QC MV', 'Autowire', 'Gudang Jadi', 'MC Cable', 'Konstruksi', 'Workshop Electric', 'Plant Tools'])->get();
+        $plants = Plant::whereNotIn('name', ['QC FO', 'HC', 'GA', 'FA', 'IT', 'Sales', 'Marketing', 'RM Office', 'RM 1', 'RM 2', 'RM 3', 'RM 5', 'MT', 'FH', 'FO', 'QR', 'QC LAB', 'QC LV', 'QC MV', 'Autowire', 'Gudang Jadi', 'MC Cable', 'Konstruksi', 'Workshop Electric', 'Plant Tools'])->get();
         $machines = Machine::all();
         $technicians = FacilityTech::all();
         $pageIds = $workOrders->pluck('id')->toArray();
 
         // COUNTERS
         $statsQuery = WorkOrderFacilities::query();
-        if ($user->role !== 'fh.admin' && $user->role !== 'super.admin') {
+        if ($user && $user->role !== 'fh.admin' && $user->role !== 'super.admin') {
             $statsQuery->where('requester_id', $user->id);
         }
         $countTotal = (clone $statsQuery)->count();
         $countPending = (clone $statsQuery)->where('status', 'pending')->count();
         $countProgress = (clone $statsQuery)->where('status', 'in_progress')->count();
         $countDone = (clone $statsQuery)->where('status', 'completed')->count();
+
         $openTicket = null;
         if ($request->has('open_ticket_id')) {
-            // Cari tiket spesifik untuk langsung dibuka di modal
-            $openTicket = \App\Models\Facilities\WorkOrderFacilities::with(['technicians', 'machine'])->find($request->open_ticket_id);
+            $openTicket = WorkOrderFacilities::with(['technicians', 'machine'])->find($request->open_ticket_id);
         }
         return view('Division.Facilities.Index', compact(
             'workOrders',
@@ -137,19 +144,12 @@ class FacilitiesController extends Controller
     // --- DASHBOARD (ADMIN STATS) ---
     public function dashboard(Request $request)
     {
-        // 1. CEK ROLE
-        if (!in_array(Auth::user()->role, ['fh.admin', 'super.admin'])) {
+        if (!Auth::check() || !in_array(Auth::user()->role, ['fh.admin', 'super.admin'])) {
             abort(403);
         }
 
-        // 2. BASE QUERY
         $query = WorkOrderFacilities::where('status', '!=', 'cancelled');
-
-        // 3. FILTER LOGIC
         $selectedMonth = null;
-
-        // Default Time Range untuk Visual Gantt (15 Hari "Brutal View")
-        // Kita set default H-7 sampai H+7 agar fokus ke pekerjaan sekarang.
         $ganttStartDate = now()->subDays(7);
         $ganttTotalDays = 15;
 
@@ -158,56 +158,45 @@ class FacilitiesController extends Controller
             try {
                 $start = Carbon::createFromFormat('Y-m', $selectedMonth)->startOfMonth();
                 $end = Carbon::createFromFormat('Y-m', $selectedMonth)->endOfMonth();
-
                 $query->whereDate('created_at', '>=', $start)->whereDate('created_at', '<=', $end);
-
-                // Jika filter bulan aktif, Gantt chart mengikuti bulan tersebut
                 $ganttStartDate = $start;
                 $ganttTotalDays = $start->daysInMonth;
             } catch (\Exception $e) {
-                // ignore invalid
             }
         } elseif ($request->filled('start_date') && $request->filled('end_date')) {
             $query->whereDate('created_at', '>=', $request->start_date)
                 ->whereDate('created_at', '<=', $request->end_date);
         } else {
-            // Jika tidak ada filter, ambil 100 teratas agar tidak berat
             $query->take(100);
         }
 
         $workOrders = $query->latest()->get();
 
-        // 4. COUNTERS & CHARTS (LOGIKA LAMA TETAP DIPAKAI)
         $countTotal = $workOrders->count();
         $countPending = $workOrders->where('status', 'pending')->count();
         $countProgress = $workOrders->where('status', 'in_progress')->count();
         $countDone = $workOrders->where('status', 'completed')->count();
 
         $catData = $workOrders->groupBy('category')->map->count();
-        $chartCatLabels = $catData->keys();
-        $chartCatValues = $catData->values();
+        $chartCatLabels = $catData->keys()->toArray();
+        $chartCatValues = $catData->values()->toArray();
 
         $statusData = $workOrders->groupBy('status')->map->count();
-        $chartStatusLabels = $statusData->keys();
-        $chartStatusValues = $statusData->values();
+        $chartStatusLabels = $statusData->keys()->toArray();
+        $chartStatusValues = $statusData->values()->toArray();
 
         $plantData = $workOrders->groupBy('plant')->map->count();
-        $chartPlantLabels = $plantData->keys();
-        $chartPlantValues = $plantData->values();
+        $chartPlantLabels = $plantData->keys()->toArray();
+        $chartPlantValues = $plantData->values()->toArray();
 
         $periodTotal = $workOrders->count();
         $periodCompleted = $workOrders->where('status', 'completed')->count();
         $completionPct = $periodTotal ? round(($periodCompleted / $periodTotal) * 100, 1) : 0;
 
-        // 5. GANTT CHART LOGIC (BARU: GROUPED & OPTIMIZED)
-        // Mengelompokkan tiket berdasarkan Kategori (Level 1)
+        // GANTT CHART LOGIC
         $groupedGantt = $workOrders->groupBy('category')->map(function ($items, $category) {
-
-            // Cari tanggal min/max dalam grup untuk keperluan logic (opsional)
             $minStart = $items->min(fn($i) => $i->start_date ? Carbon::parse($i->start_date) : $i->created_at);
             $maxEnd   = $items->max(fn($i) => $i->actual_completion_date ?? $i->target_completion_date);
-
-            // Cek apakah ada delay di grup ini
             $hasDelay = $items->contains(function ($i) {
                 $target = $i->target_completion_date ? Carbon::parse($i->target_completion_date) : now();
                 return $i->status != 'completed' && $target->isPast();
@@ -221,19 +210,14 @@ class FacilitiesController extends Controller
                 'end' => $maxEnd,
                 'has_delay' => $hasDelay,
                 'items' => $items->map(function ($wo) {
-                    // Tentukan Tanggal Mulai & Selesai Item
                     $start = $wo->start_date ? Carbon::parse($wo->start_date) : $wo->created_at;
-
                     if ($wo->status == 'completed' && $wo->actual_completion_date) {
                         $end = Carbon::parse($wo->actual_completion_date);
                     } else {
                         $end = $wo->target_completion_date ? Carbon::parse($wo->target_completion_date) : now();
                     }
-
-                    // Jika end < start, paksa sama (durasi 1 hari)
                     if ($end->lt($start)) $end = $start->copy();
 
-                    // Logic Warna Status (Visual Waras)
                     $statusColor = match ($wo->status) {
                         'completed' => 'bg-emerald-500',
                         'in_progress' => 'bg-blue-500',
@@ -241,14 +225,11 @@ class FacilitiesController extends Controller
                         'cancelled' => 'bg-slate-200',
                         default => 'bg-slate-300'
                     };
-
-                    // Override Merah jika Delay
                     $isDelayed = false;
                     if ($wo->status != 'completed' && $end->isPast()) {
                         $statusColor = 'bg-rose-500';
                         $isDelayed = true;
                     }
-
                     return [
                         'id' => $wo->id,
                         'ticket' => $wo->ticket_num,
@@ -257,13 +238,12 @@ class FacilitiesController extends Controller
                         'end' => $end,
                         'color' => $statusColor,
                         'is_delayed' => $isDelayed,
-                        'pic' => $wo->technicians->pluck('name')->join(', '), // Ambil nama teknisi
+                        'pic' => $wo->technicians->pluck('name')->join(', '),
                     ];
-                })->values() // Reset array keys setelah map
+                })->values()
             ];
         });
 
-        // 6. TECH CHART LOGIC (KEEP EXISTING)
         $techData = [];
         foreach ($workOrders as $wo) {
             if ($wo->technicians && $wo->technicians->count() > 0) {
@@ -276,8 +256,8 @@ class FacilitiesController extends Controller
             }
         }
         arsort($techData);
-        $chartTechLabels = collect($techData)->keys();
-        $chartTechValues = collect($techData)->values();
+        $chartTechLabels = collect($techData)->keys()->toArray();
+        $chartTechValues = collect($techData)->values()->toArray();
 
         return view('Division.Facilities.Dashboard', compact(
             'workOrders',
@@ -295,10 +275,9 @@ class FacilitiesController extends Controller
             'chartTechValues',
             'completionPct',
             'selectedMonth',
-            // Variable Baru untuk Gantt Chart "Brutal"
             'groupedGantt',
-            'ganttStartDate', // Variable nama baru untuk view ($startDate)
-            'ganttTotalDays'  // Variable nama baru untuk view ($totalDays)
+            'ganttStartDate',
+            'ganttTotalDays'
         ));
     }
 
@@ -314,28 +293,21 @@ class FacilitiesController extends Controller
             'photo' => 'image|max:5120'
         ];
 
-        // 2. Validasi Tambahan Berdasarkan Kategori
+        // 2. Validasi Tambahan
         if ($request->category == 'Pemasangan Mesin') {
-            // Jika pasang mesin baru, wajib isi nama mesin baru
             $rules['new_machine_name'] = 'required|string|max:255';
-        }
-        // [FIX] Tambahkan 'Pembuatan Alat Baru' ke array ini
-        elseif (in_array($request->category, [
+        } elseif (in_array($request->category, [
             'Modifikasi Mesin',
             'Pembongkaran Mesin',
             'Relokasi Mesin',
             'Perbaikan',
-            'Pembuatan Alat Baru' // <-- DITAMBAHKAN
+            'Pembuatan Alat Baru'
         ])) {
-            // Jika kategori ini, wajib pilih mesin dari dropdown
             $rules['machine_id'] = 'required|exists:machines,id';
         }
 
         $request->validate($rules);
-
         $photoPath = $request->hasFile('photo') ? $request->file('photo')->store('wo_facilities', 'public') : null;
-
-        // ... (Sisa kode ke bawah sama seperti sebelumnya) ...
 
         // 3. Generate Ticket Number
         $bulanIndo = [
@@ -346,51 +318,45 @@ class FacilitiesController extends Controller
             '05' => 'MEI',
             '06' => 'JUN',
             '07' => 'JUL',
-            '08' => 'AGU', // Agustus biasanya disingkat AGU atau AGS
+            '08' => 'AGU',
             '09' => 'SEP',
-            '10' => 'OKT', // October jadi OKT
+            '10' => 'OKT',
             '11' => 'NOV',
-            '12' => 'DES'  // December jadi DES
+            '12' => 'DES'
         ];
-
-        // 2. Ambil komponen tanggal saat ini
-        $hari  = date('d'); // 18
-        $bulan = date('m'); // 12
-        $tahun = date('y'); // 25
-
-        // 3. Susun kodenya
-        // Hasil: 18DES25
+        $hari  = date('d');
+        $bulan = date('m');
+        $tahun = date('y');
         $dateCode = $hari . $bulanIndo[$bulan] . $tahun;
         $prefix = 'FAC-' . $dateCode . '-';
         $lastTicket = WorkOrderFacilities::where('ticket_num', 'like', $prefix . '%')->orderBy('id', 'desc')->first();
         $newSeq = $lastTicket ? ((int)substr($lastTicket->ticket_num, -3) + 1) : 1;
         $ticketNum = $prefix . sprintf('%03d', $newSeq);
 
-        $plantObj = \App\Models\Engineering\Plant::find($request->plant_id);
+        $plantObj = Plant::find($request->plant_id);
         $plantName = $plantObj ? $plantObj->name : '-';
 
-        // 5. LOGIKA PENENTUAN MESIN
+        // 4. Logika Mesin
         $machineId = null;
         $machineName = null;
 
         if ($request->category == 'Pemasangan Mesin') {
-            // SKENARIO A: MESIN BARU (Create Master Data)
-            $newMachine = \App\Models\Engineering\Machine::create([
+            $newMachine = Machine::create([
                 'plant_id' => $request->plant_id,
                 'name' => $request->new_machine_name,
-                'code' => 'NEW-' . strtoupper(\Illuminate\Support\Str::random(5)),
+                'code' => 'NEW-' . strtoupper(Str::random(5)),
             ]);
             $machineId = $newMachine->id;
             $machineName = $newMachine->name;
         } else {
-            // SKENARIO B: MESIN LAMA (Dari Dropdown)
             if ($request->filled('machine_id')) {
-                $m = \App\Models\Engineering\Machine::find($request->machine_id);
+                $m = Machine::find($request->machine_id);
                 $machineId = $m->id;
                 $machineName = $m->name;
             }
         }
 
+        // 5. Simpan DB
         $wo = WorkOrderFacilities::create([
             'ticket_num' => $ticketNum,
             'requester_id' => Auth::id(),
@@ -408,78 +374,94 @@ class FacilitiesController extends Controller
             'photo_path' => $photoPath,
             'status' => 'pending'
         ]);
-        // $wo   = WorkOrderFacilities::create($data);
-        event(new TicketCreated($wo));
-        return redirect()->route('fh.index')->with('success', 'Request Created Successfully!');
+
+        // 6. Notifikasi Tiket Baru ke Admin
+        try {
+            // Cari admin (fh.admin / super.admin)
+            $admins = User::whereIn('role', ['fh.admin', 'super.admin'])->get();
+
+            if ($admins->count() > 0) {
+                Notification::send($admins, new NewTicketCreated($wo));
+                Log::info("API: Notifikasi tiket baru dikirim ke " . $admins->count() . " admin.");
+            } else {
+                Log::warning("API: Tidak ada admin found untuk notifikasi.");
+            }
+        } catch (\Exception $e) {
+            Log::error('API Error: Gagal kirim notifikasi: ' . $e->getMessage());
+        }
+        // ============================================================
+
+        return response()->json([
+            'message' => 'Work order created successfully',
+            'data' => $wo
+        ], 201);
     }
 
-    // --- UPDATE STATUS (ACCEPT / ASSIGN TECH) ---
-    // --- UPDATE STATUS ---
     // --- UPDATE STATUS ---
     public function updateStatus(Request $request, $id)
     {
         $wo = WorkOrderFacilities::findOrFail($id);
 
-        // --- 1. VALIDASI INPUT ---
-        // Kita validasi dulu sebelum memproses data
         $rules = [
             'status' => 'required|in:pending,in_progress,completed,cancelled',
-            'facility_tech_ids' => 'nullable', // Bisa array atau string
+            'facility_tech_ids' => 'nullable',
+            'note' => 'nullable|string'
         ];
-
-        // ATURAN KHUSUS: Jika status Completed, Tanggal Selesai (Actual) WAJIB diisi
         if ($request->status === 'completed') {
             $rules['actual_completion_date'] = 'required|date';
         }
-
         $request->validate($rules);
 
-        // --- 2. UPDATE STATUS ---
         $wo->status = $request->status;
 
-        // --- 3. LOGIKA TANGGAL (PENTING) ---
+        // Logic Tanggal & Note
         if ($request->status === 'completed') {
-            // AMBIL DARI INPUT MANUAL USER (Sesuai request Anda)
             $wo->actual_completion_date = $request->actual_completion_date;
+            $wo->completion_note = $request->note;
         } elseif ($request->status === 'in_progress') {
-            // Logic Start Date:
-            // 1. Jika user input tanggal mulai manual, pakai itu.
-            // 2. Jika tidak input manual DAN di database masih kosong, isi otomatis hari ini.
             if ($request->filled('start_date')) {
                 $wo->start_date = $request->start_date;
             } elseif (is_null($wo->start_date)) {
                 $wo->start_date = now();
             }
-
-            // Reset tanggal selesai jika status dikembalikan ke in_progress
             $wo->actual_completion_date = null;
+            $wo->completion_note = null;
         } else {
-            // Jika status Pending/Cancelled, reset tanggal selesai
             $wo->actual_completion_date = null;
+            $wo->completion_note = null;
         }
 
-        // --- 4. SIMPAN TEKNISI (MULTIPLE) ---
+        // Logic Teknisi
         $ids = $request->input('facility_tech_ids', []);
-
-        // Handling jika input berupa string "1,2" (kadang terjadi pada form multipart)
-        if (!is_array($ids)) {
-            $ids = explode(',', (string)$ids);
-        }
-
-        // Filter angka valid saja
+        if (!is_array($ids)) $ids = explode(',', (string)$ids);
         $ids = array_filter($ids, function ($value) {
             return is_numeric($value) && $value > 0;
         });
-
         $wo->technicians()->sync($ids);
 
-        // --- 5. CATAT PEMROSES (Jika belum ada) ---
-        if (!$wo->processed_by) {
+        // Logic Pemroses
+        if (!$wo->processed_by && Auth::check()) {
             $wo->processed_by = Auth::id();
             $wo->processed_by_name = Auth::user()->name;
         }
 
         $wo->save();
+
+        // LOGIKA NOTIFIKASI STATUS UPDATE
+        try {
+            $requester = User::find($wo->requester_id);
+            if ($requester) {
+                // Gunakan Notifikasi Status (TicketStatusNotification)
+                // Pastikan class ini di import di atas!
+                $requester->notify(new TicketStatusNotification($wo));
+            }
+        } catch (\Exception $e) {
+            Log::error('Gagal kirim notifikasi update status: ' . $e->getMessage());
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json(['message' => 'Status updated successfully!', 'data' => $wo]);
+        }
 
         return redirect()->back()->with('success', 'Status updated successfully!');
     }

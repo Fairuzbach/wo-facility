@@ -113,7 +113,7 @@
                                         </path>
                                     </svg>
                                 </button>
-                                @if (Auth::user()->role == 'fh.admin')
+                                @if (Auth::user()?->role == 'fh.admin')
                                     <button @click='openEditModal(@json($wo))'
                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition border border-transparent hover:border-amber-100">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
