@@ -69,21 +69,93 @@
                                 title="{{ $wo->description }}">{{ $wo->description }}</div>
                         </td>
                         <td class="px-6 py-4 align-top">
+                            {{-- LOGIKA BARU: CEK APPROVAL --}}
                             @php
-                                $st = $wo->status;
-                                $cls = match ($st) {
-                                    'completed' => 'bg-emerald-100 text-emerald-700 border-emerald-200',
-                                    'in_progress' => 'bg-blue-100 text-blue-700 border-blue-200',
-                                    'pending' => 'bg-amber-100 text-amber-700 border-amber-200',
-                                    'cancelled' => 'bg-rose-100 text-rose-700 border-rose-200',
-                                    default => 'bg-slate-100 text-slate-600 border-slate-200',
-                                };
-                            @endphp
-                            <span
-                                class="inline-flex items-center px-3 py-1 rounded-full border {{ $cls }} text-[10px] font-bold uppercase tracking-wide shadow-sm">
-                                {{ str_replace('_', ' ', $st) }}
-                            </span>
+                                // 1. Cek apakah tiket butuh approval
+                                $needsApproval = $wo->internal_status == 'waiting_spv';
 
+                                // 2. Cek apakah user punya hak approve (Admin Divisi / Super Admin)
+                                $userRole = Auth::user() ? Auth::user()->role : '';
+                                $canApprove = in_array($userRole, [
+                                    'eng.admin',
+                                    'ga.admin',
+                                    'mt.admin',
+                                    'super.admin',
+                                    'fh.admin',
+                                ]);
+                            @endphp
+
+
+                            {{-- SKENARIO A: TAMPILKAN TOMBOL APPROVE & DECLINE --}}
+                            @if ($needsApproval && $canApprove)
+                                <div class="flex flex-col gap-2 items-start">
+                                    <span
+                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-yellow-100 text-yellow-800 border border-yellow-200">
+                                        MENUNGGU APPROVAL
+                                    </span>
+
+                                    <div class="flex items-center gap-2">
+                                        {{-- Tombol Approve --}}
+                                        <form action="{{ route('fh.approve', $wo->id) }}" method="POST">
+                                            @csrf
+                                            <button type="submit"
+                                                onclick="return confirm('Apakah Anda yakin ingin menyetujui tiket ini?')"
+                                                class="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white text-[10px] font-bold rounded-lg shadow-md hover:shadow-lg transition transform active:scale-95 flex items-center gap-1">
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                                </svg>
+                                                Approve
+                                            </button>
+                                        </form>
+
+                                        {{-- Tombol Decline (BARU) --}}
+                                        {{-- Pastikan route 'fh.decline' sudah dibuat di web.php --}}
+                                        <form action="{{ route('fh.decline', $wo->id) }}" method="POST">
+                                            @csrf
+                                            {{-- Gunakan @method('PUT') atau @method('DELETE') jika route anda membutuhkannya --}}
+                                            <button type="submit"
+                                                onclick="return confirm('Apakah Anda yakin ingin menolak tiket ini?')"
+                                                class="px-3 py-1.5 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white text-[10px] font-bold rounded-lg shadow-md hover:shadow-lg transition transform active:scale-95 flex items-center gap-1">
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                                </svg>
+                                                Decline
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+
+                                {{-- SKENARIO B: TAMPILAN STATUS BIASA (Lama) --}}
+                            @else
+                                @php
+                                    $st = $wo->status;
+                                    // Jika status masih draft/waiting_spv tapi yang lihat bukan admin, tetap tampilkan statusnya
+                                    if ($wo->internal_status == 'waiting_spv') {
+                                        $st_label = 'MENUNGGU SPV';
+                                        $cls = 'bg-slate-100 text-slate-600 border-slate-200';
+                                    } else {
+                                        $st_label = str_replace('_', ' ', $st);
+                                        $cls = match ($st) {
+                                            'completed' => 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                                            'in_progress' => 'bg-blue-100 text-blue-700 border-blue-200',
+                                            'pending' => 'bg-amber-100 text-amber-700 border-amber-200',
+                                            'cancelled' => 'bg-rose-100 text-rose-700 border-rose-200',
+                                            default => 'bg-slate-100 text-slate-600 border-slate-200',
+                                        };
+                                    }
+                                @endphp
+
+                                <span
+                                    class="inline-flex items-center px-3 py-1 rounded-full border {{ $cls }} text-[10px] font-bold uppercase tracking-wide shadow-sm">
+                                    {{ $st_label }}
+                                </span>
+                            @endif
+
+                            {{-- TAMPILAN TEKNISI (TETAP MUNCUL DI KEDUA SKENARIO) --}}
                             @if ($wo->technicians->count() > 0)
                                 <div class="mt-3 flex -space-x-2 overflow-hidden pl-1">
                                     @foreach ($wo->technicians->take(3) as $tech)

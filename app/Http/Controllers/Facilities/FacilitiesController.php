@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Facilities;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
@@ -25,6 +26,19 @@ use App\Notifications\TicketStatusNotification; // Pastikan file ini ada
 
 class FacilitiesController extends Controller
 {
+    private function getAccessMap()
+    {
+        return [
+            // Format: 'ROLE' => ['Nama Divisi di DB 1', 'Nama Divisi di DB 2']
+            'eng.admin' => ['Engineering', 'ENGINEERING', 'Teknik'], // Tambahkan variasi biar aman
+            'ga.admin'  => ['General Affair', 'General Affairs', 'GA', 'HRD'],
+            'mt.admin'  => ['Maintenance', 'MAINTENANCE', 'MT'],
+
+            // Role Admin FH/Super Admin = ALL
+            'super.admin' => ['ALL'],
+            'fh.admin'    => ['ALL']
+        ];
+    }
     private function buildQuery(Request $request)
     {
         $query = WorkOrderFacilities::query();
@@ -58,13 +72,45 @@ class FacilitiesController extends Controller
     }
 
     // --- MAIN PAGE (TABLE & FORM) ---
+    // --- MAIN PAGE (TABLE & FORM) ---
     public function index(Request $request)
     {
         // 1. BASE QUERY
         $query = WorkOrderFacilities::query();
         $user = Auth::user();
 
-        // 2. FILTER SEARCH
+        // --- LOGIKA FILTER AKSES BARU (MODIFIKASI DISINI) ---
+        if ($user) {
+            $role = $user->role;
+            $accessMap = $this->getAccessMap();
+
+            // 1. SUPER ADMIN (Bisa lihat segalanya untuk monitoring)
+            if ($role === 'super.admin') {
+                // Tidak ada filter, lihat semua
+            }
+
+            // 2. FACILITY ADMIN (fh.admin)
+            // KUNCI: Hanya boleh lihat tiket yang SUDAH DI-APPROVE SPV
+            elseif ($role === 'fh.admin') {
+                $query->where('internal_status', '!=', 'waiting_spv');
+                // Atau bisa juga: $query->where('status', '!=', 'draft');
+            }
+
+            // 3. ADMIN DIVISI (eng.admin, ga.admin, dll)
+            elseif (array_key_exists($role, $accessMap)) {
+                // Hanya lihat divisi sendiri (Termasuk yang belum diapprove, karena dia harus approve)
+                $allowedDepts = $accessMap[$role];
+                $query->whereIn('requester_division', $allowedDepts);
+            }
+
+            // 4. USER BIASA / STAFF
+            else {
+                $query->where('requester_id', $user->id);
+            }
+        }
+        // ----------------------------------------------------
+
+        // 2. FILTER SEARCH (Logika Lama - Tetap)
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -75,7 +121,7 @@ class FacilitiesController extends Controller
             });
         }
 
-        // 3. FILTER DROPDOWN
+        // 3. FILTER DROPDOWN (Logika Lama - Tetap)
         if ($request->filled('status')) $query->where('status', $request->status);
         if ($request->filled('category')) $query->where('category', $request->category);
         if ($request->filled('plant_id')) {
@@ -83,14 +129,7 @@ class FacilitiesController extends Controller
             $query->where('plant', $plantName);
         }
 
-        // Permission Check
-        if ($user) {
-            if ($user->role !== 'fh.admin' && $user->role !== 'super.admin') {
-                $query->where('requester_id', $user->id);
-            }
-        }
-
-        // 4. LOGIKA EXPORT XLSX
+        // 4. LOGIKA EXPORT XLSX (Logika Lama - Tetap)
         if ($request->has('export') && $request->export == 'true') {
             if ($request->filled('selected_ids')) {
                 $ids = explode(',', $request->selected_ids);
@@ -102,7 +141,7 @@ class FacilitiesController extends Controller
         }
 
         // 5. GET DATA UTAMA
-        $workOrders = $query->with(['user', 'technicians', 'machine'])
+        $workOrders = $query->with(['user', 'technicians', 'machine']) // Tambahkan 'user' kembali
             ->latest()
             ->paginate(10)
             ->withQueryString();
@@ -113,20 +152,18 @@ class FacilitiesController extends Controller
         $technicians = FacilityTech::all();
         $pageIds = $workOrders->pluck('id')->toArray();
 
-        // COUNTERS
-        $statsQuery = WorkOrderFacilities::query();
-        if ($user && $user->role !== 'fh.admin' && $user->role !== 'super.admin') {
-            $statsQuery->where('requester_id', $user->id);
-        }
-        $countTotal = (clone $statsQuery)->count();
-        $countPending = (clone $statsQuery)->where('status', 'pending')->count();
-        $countProgress = (clone $statsQuery)->where('status', 'in_progress')->count();
-        $countDone = (clone $statsQuery)->where('status', 'completed')->count();
+        // COUNTERS (Disesuaikan dengan logika filter di atas)
+        // Kita clone query utama agar counternya akurat sesuai hak akses user
+        $countTotal = (clone $query)->count();
+        $countPending = (clone $query)->where('status', 'pending')->count();
+        $countProgress = (clone $query)->where('status', 'in_progress')->count();
+        $countDone = (clone $query)->where('status', 'completed')->count();
 
         $openTicket = null;
         if ($request->has('open_ticket_id')) {
             $openTicket = WorkOrderFacilities::with(['technicians', 'machine'])->find($request->open_ticket_id);
         }
+
         return view('Division.Facilities.Index', compact(
             'workOrders',
             'plants',
@@ -284,119 +321,188 @@ class FacilitiesController extends Controller
     // --- STORE ---
     public function store(Request $request)
     {
-        // 1. Validasi Dasar
-        $rules = [
-            'requester_name' => 'required|string',
-            'plant_id' => 'required',
-            'description' => 'required',
-            'category' => 'required',
-            'photo' => 'image|max:5120'
-        ];
-
-        // 2. Validasi Tambahan
-        if ($request->category == 'Pemasangan Mesin') {
-            $rules['new_machine_name'] = 'required|string|max:255';
-        } elseif (in_array($request->category, [
-            'Modifikasi Mesin',
-            'Pembongkaran Mesin',
-            'Relokasi Mesin',
-            'Perbaikan',
-            'Pembuatan Alat Baru'
-        ])) {
-            $rules['machine_id'] = 'required|exists:machines,id';
-        }
-
-        $request->validate($rules);
-        $photoPath = $request->hasFile('photo') ? $request->file('photo')->store('wo_facilities', 'public') : null;
-
-        // 3. Generate Ticket Number
-        $bulanIndo = [
-            '01' => 'JAN',
-            '02' => 'FEB',
-            '03' => 'MAR',
-            '04' => 'APR',
-            '05' => 'MEI',
-            '06' => 'JUN',
-            '07' => 'JUL',
-            '08' => 'AGU',
-            '09' => 'SEP',
-            '10' => 'OKT',
-            '11' => 'NOV',
-            '12' => 'DES'
-        ];
-        $hari  = date('d');
-        $bulan = date('m');
-        $tahun = date('y');
-        $dateCode = $hari . $bulanIndo[$bulan] . $tahun;
-        $prefix = 'FAC-' . $dateCode . '-';
-        $lastTicket = WorkOrderFacilities::where('ticket_num', 'like', $prefix . '%')->orderBy('id', 'desc')->first();
-        $newSeq = $lastTicket ? ((int)substr($lastTicket->ticket_num, -3) + 1) : 1;
-        $ticketNum = $prefix . sprintf('%03d', $newSeq);
-
-        $plantObj = Plant::find($request->plant_id);
-        $plantName = $plantObj ? $plantObj->name : '-';
-
-        // 4. Logika Mesin
-        $machineId = null;
-        $machineName = null;
-
-        if ($request->category == 'Pemasangan Mesin') {
-            $newMachine = Machine::create([
-                'plant_id' => $request->plant_id,
-                'name' => $request->new_machine_name,
-                'code' => 'NEW-' . strtoupper(Str::random(5)),
-            ]);
-            $machineId = $newMachine->id;
-            $machineName = $newMachine->name;
-        } else {
-            if ($request->filled('machine_id')) {
-                $m = Machine::find($request->machine_id);
-                $machineId = $m->id;
-                $machineName = $m->name;
-            }
-        }
-
-        // 5. Simpan DB
-        $wo = WorkOrderFacilities::create([
-            'ticket_num' => $ticketNum,
-            'requester_id' => Auth::id(),
-            'requester_name' => $request->requester_name,
-            'plant' => $plantName,
-            'machine_id' => $machineId,
-            'machine_name' => $machineName,
-            'location_details' => $request->location_detail ?? '-',
-            'report_date' => $request->report_date ? Carbon::parse($request->report_date) : now(),
-            'report_time' => $request->report_time,
-            'shift' => $request->shift,
-            'description' => $request->description,
-            'category' => $request->category,
-            'target_completion_date' => $request->target_completion_date,
-            'photo_path' => $photoPath,
-            'status' => 'pending'
+        // 1. VALIDASI
+        $request->validate([
+            'plant_id'           => 'required',
+            'category'           => 'required',
+            'description'        => 'required',
+            'requester_nik'      => 'required|array|min:1',
+            'requester_name'     => 'required|array',
+            'requester_division' => 'required|array',
+            'photo'              => 'image|max:5120|nullable'
         ]);
 
-        // 6. Notifikasi Tiket Baru ke Admin
         try {
-            // Cari admin (fh.admin / super.admin)
-            $admins = User::whereIn('role', ['fh.admin', 'super.admin'])->get();
+            return DB::transaction(function () use ($request) {
 
-            if ($admins->count() > 0) {
-                Notification::send($admins, new NewTicketCreated($wo));
-                Log::info("API: Notifikasi tiket baru dikirim ke " . $admins->count() . " admin.");
-            } else {
-                Log::warning("API: Tidak ada admin found untuk notifikasi.");
-            }
+                // 2. OLAH DATA MULTIPLE REQUESTER (GUEST MODE)
+                $niks  = $request->input('requester_nik');
+                $names = $request->input('requester_name');
+                $divs  = $request->input('requester_division');
+
+                // Gabung jadi string: "Fairuz (12345), Budi (67890)"
+                $combinedNames = [];
+                foreach ($names as $key => $name) {
+                    $nik = $niks[$key] ?? 'N/A';
+                    $combinedNames[] = trim($name) . " (" . trim($nik) . ")";
+                }
+
+                $finalRequesterName = implode(', ', $combinedNames);
+                $finalRequesterNik  = implode(', ', $niks);
+                $mainDivision       = $divs[0] ?? '-';
+
+                // 3. GENERATE NOMOR TIKET
+                $bulanIndo = ['01' => 'JAN', '02' => 'FEB', '03' => 'MAR', '04' => 'APR', '05' => 'MEI', '06' => 'JUN', '07' => 'JUL', '08' => 'AGU', '09' => 'SEP', '10' => 'OKT', '11' => 'NOV', '12' => 'DES'];
+                $prefix = 'FAC-' . date('d') . $bulanIndo[date('m')] . date('y') . '-';
+
+                $lastTicket = WorkOrderFacilities::where('ticket_num', 'like', $prefix . '%')
+                    ->orderBy('id', 'desc')
+                    ->first();
+
+                $newSeq = $lastTicket ? ((int)substr($lastTicket->ticket_num, -3) + 1) : 1;
+                $ticketNum = $prefix . sprintf('%03d', $newSeq);
+
+                // 4. AMBIL DATA PLANT
+                $plantObj = Plant::find($request->plant_id);
+                $plantName = $plantObj ? $plantObj->name : '-';
+
+                // 5. UPLOAD FOTO
+                $photoPath = $request->hasFile('photo') ?
+                    $request->file('photo')->store('wo_facilities', 'public') : null;
+
+                // 6. SIMPAN KE DATABASE
+                $wo = WorkOrderFacilities::create([
+                    'ticket_num'         => $ticketNum,
+                    'requester_id'       => null, // Null karena multiple/guest
+                    'requester_nik'      => $finalRequesterNik,
+                    'requester_name'     => $finalRequesterName,
+                    'requester_division' => $mainDivision,
+                    'plant'              => $plantName,
+                    'description'        => $request->description,
+                    'category'           => $request->category,
+                    'machine_id'         => $request->machine_id,
+                    'new_machine_name'   => $request->new_machine_name,
+                    'photo_path'         => $photoPath,
+                    'target_completion_date' => $request->target_completion_date,
+                    'status'             => 'draft',
+                    'internal_status'    => 'waiting_spv'
+                ]);
+
+                return response()->json([
+                    'message' => 'Tiket berhasil dibuat',
+                    'data'    => $wo
+                ], 201);
+            });
         } catch (\Exception $e) {
-            Log::error('API Error: Gagal kirim notifikasi: ' . $e->getMessage());
-        }
-        // ============================================================
+            // Tulis error ke log laravel agar bisa dibaca di storage/logs/laravel.log
+            Log::error("FATAL ERROR STORE WO: " . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
 
-        return response()->json([
-            'message' => 'Work order created successfully',
-            'data' => $wo
-        ], 201);
+            return response()->json([
+                'message' => 'Terjadi kesalahan server: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
+    // Approval SPV
+    // --- HALAMAN LIST APPROVAL (BERDASARKAN ROLE) ---
+    public function approvalIndex()
+    {
+        $user = Auth::user();
+        $role = $user->role;
+        $tickets = \App\Models\Facilities\WorkOrderFacilities::where('internal_status', 'waiting_spv')->get();
+
+        // 2. Tampilkan Data Mentah di Layar
+        // dd([
+        //     'A. PERAN ANDA' => $role,
+
+        //     'B. MAPPING DI KODINGAN' => $this->getAccessMap()[$role] ?? 'TIDAK ADA DI MAP',
+
+        //     'C. NAMA DIVISI YANG ADA DI 70 TIKET TSB' => $tickets->pluck('requester_division')->unique()->values()->toArray()
+        // ]);
+        // 1. Ambil Mapping dari function private
+        $accessMap = $this->getAccessMap();
+
+        // 2. Cek apakah role user punya akses?
+        // Kita cek apakah key role ada di array, ATAU dia admin global
+        $isGlobalAdmin = in_array($role, ['super.admin', 'fh.admin']);
+
+        if (!array_key_exists($role, $accessMap) && !$isGlobalAdmin) {
+            return redirect()->route('fh.index')
+                ->with('error', 'Role Anda (' . $role . ') tidak memiliki akses approval.');
+        }
+
+        // 3. Tentukan Divisi yang Boleh Dilihat
+        // Jika user tidak ada di map tapi lolos validasi (berarti super admin), kita anggap ALL
+        $allowedDepts = $accessMap[$role] ?? ['ALL'];
+
+        // 4. Query Tiket
+        $query = \App\Models\Facilities\WorkOrderFacilities::with('user')
+            ->where('internal_status', 'waiting_spv')
+            ->orderBy('created_at', 'desc');
+
+        // Jika bukan ALL, filter whereIn
+        if (!in_array('ALL', $allowedDepts)) {
+            $query->whereIn('requester_division', $allowedDepts);
+        }
+
+        $approvals = $query->get();
+
+        return view('Division.Facilities.Approval', compact('approvals', 'role'));
+    }
+
+    // --- ACTION APPROVE TIKET ---
+    public function approve($id)
+    {
+        $user = Auth::user();
+        $role = $user->role;
+        $wo = WorkOrderFacilities::findOrFail($id);
+
+        // 1. Ambil Mapping (Konsisten dengan Index)
+        $accessMap = $this->getAccessMap();
+
+        // 2. Cek Hak Akses Super Admin (Bypass)
+        $isSuper = in_array($role, ['super.admin', 'fh.admin']);
+
+        // 3. Cek Hak Akses Per Divisi
+        if (!$isSuper) {
+            // Ambil daftar divisi yang boleh dihandle user ini
+            $myAllowedDepts = $accessMap[$role] ?? [];
+
+            // Security Check: Apakah divisi tiket ini ada dalam daftar izin user?
+            if (!in_array($wo->requester_division, $myAllowedDepts)) {
+                return redirect()->back()->with(
+                    'error',
+                    'Akses Ditolak! Anda (' . $role . ') hanya boleh menyetujui divisi: ' . implode(', ', $myAllowedDepts) .
+                        '. Sedangkan tiket ini dari: ' . $wo->requester_division
+                );
+            }
+        }
+
+        // 4. Eksekusi Approval
+        $wo->update([
+            'internal_status' => 'approved',
+            'status' => 'pending',
+            'approved_at' => now(),
+            'approved_by' => $user->id
+        ]);
+
+        return redirect()->back()->with('success', 'Tiket berhasil disetujui!');
+    }
+    public function decline($id)
+    {
+        // 1. Cari data tiket
+        $workOrder = WorkOrderFacilities::findOrFail($id);
+
+        // 2. Ubah status (sesuaikan dengan flow bisnis Anda, misal: 'cancelled' atau 'rejected')
+        $workOrder->status = 'cancelled';
+        $workOrder->internal_status = 'rejected_by_admin'; // Opsional, jika ada internal status
+        $workOrder->save();
+
+        // 3. Kembali ke halaman sebelumnya dengan pesan sukses
+        return redirect()->back()->with('success', 'Tiket berhasil ditolak.');
+    }
     // --- UPDATE STATUS ---
     public function updateStatus(Request $request, $id)
     {

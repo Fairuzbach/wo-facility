@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use App\Models\Employee;
 use App\Http\Controllers\Api\WorkOrderFacilityController;
 use App\Http\Controllers\Facilities\FacilitiesController;
 
@@ -13,14 +14,38 @@ use App\Http\Controllers\Facilities\FacilitiesController;
 |--------------------------------------------------------------------------
 */
 
-// --- 1. PUBLIC ROUTES (Bisa Diakses Tanpa Login) ---
-// User tamu bisa melihat daftar work order
+// =================================================================
+// 1. PUBLIC ROUTES (Bisa Diakses Tanpa Login / Guest)
+// =================================================================
+
+// GET List Work Order (Public Read)
 Route::get('/facility-wo', [WorkOrderFacilityController::class, 'index']);
-// User tamu bisa melihat detail work order
+
+// GET Detail Work Order (Public Read)
 Route::get('/facility-wo/{id}', [WorkOrderFacilityController::class, 'show']);
 
+// POST Create Work Order (Public Create - Agar Tamu bisa buat tiket)
+// --- PINDAHKAN DARI BAWAH KE SINI ---
+Route::post('/facility-wo', [WorkOrderFacilityController::class, 'store']);
 
-// --- 2. PROTECTED ROUTES (Wajib Login / Punya Token) ---
+// Helper Cek NIK
+Route::get('/employee/{nik}', function ($nik) {
+    $employee = Employee::where('nik', $nik)->first();
+    // Return null agar JS bisa handle jika data tidak ada, jangan error
+    return response()->json($employee);
+});
+Route::get('/machines/plant/{plantId}', function ($plantId) {
+    $machines = \App\Models\Engineering\Machine::where('plant_id', $plantId)
+        ->select('id', 'name')
+        ->orderBy('name')
+        ->get();
+
+    return response()->json($machines);
+});
+
+// =================================================================
+// 2. PROTECTED ROUTES (Wajib Login / Punya Token)
+// =================================================================
 Route::middleware(['auth:sanctum'])->group(function () {
 
     // User cek data diri sendiri
@@ -28,15 +53,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
         return $request->user();
     });
 
-    // Buat WO baru (Create)
-    Route::post('/facility-wo', [WorkOrderFacilityController::class, 'store']);
+    // --- Create dipindah ke atas (Public) ---
 
-    // Update status WO (Update)
+    // Update Data & Status (Hanya Admin/SPV yang login)
     Route::put('/facility-wo/{id}', [WorkOrderFacilityController::class, 'update']);
     Route::put('/facility-wo/{id}/update-status', [FacilitiesController::class, 'updateStatus']);
 
-    // Export Data (Saya tambahkan ini sesuai request Anda sebelumnya)
-    // Pastikan nanti buat function 'export' di controller WorkOrderFacilityController
+    // Export Data
     Route::get('/facility-wo/export/data', [WorkOrderFacilityController::class, 'export']);
 });
 
@@ -54,7 +77,6 @@ Route::post('/login-token', function (Request $request) {
         return response()->json(['message' => 'Login gagal, cek email/password'], 401);
     }
 
-    // Buat token baru
     $token = $user->createToken('api-token')->plainTextToken;
 
     return response()->json([

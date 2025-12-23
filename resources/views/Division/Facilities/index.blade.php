@@ -1,19 +1,13 @@
 @section('browser_title', 'Facilities Work Order')
 
-{{-- 1. LOGIKA TOKEN AMAN (PHP) --}}
+{{-- 1. LOGIKA TOKEN (Hanya untuk Admin/SPV yg Login) --}}
 @php
     $apiToken = '';
-    // Cek apakah user login DAN user object-nya ada
-    if (Auth::check() && Auth::user()) {
+    // Token hanya digenerate jika user login (untuk keperluan Edit/Update/Approval)
+    if (Auth::check()) {
         $apiToken = Auth::user()->createToken('web-access')->plainTextToken;
     }
 @endphp
-
-<script>
-    // Gunakan variable $apiToken yang sudah aman dari PHP di atas
-    const API_TOKEN = "{{ $apiToken }}";
-    const API_URL = "{{ url('/api/facility-wo') }}"; // Typo fixed: apai -> api
-</script>
 
 <x-app-layout>
     {{-- HEADER --}}
@@ -39,12 +33,23 @@
     {{-- LIBRARIES --}}
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 
+    {{-- 2. KONFIGURASI JAVASCRIPT GLOBAL --}}
     <script>
         window.facilitiesConfig = {
+            // Status Login
             isLoggedIn: {{ Auth::check() ? 'true' : 'false' }},
 
+            // Token (Kosong jika tamu)
             apiToken: "{{ $apiToken }}",
+
+            // URL PENTING:
+            // 1. createUrl: Mengarah ke Public Route di web.php
+            createUrl: "{{ route('fh.store') }}",
+
+            // 2. apiUrl: Mengarah ke API Admin (jika diperlukan untuk edit/update)
             apiUrl: "{{ url('/api/facility-wo') }}",
+
+            // Data Pendukung
             machines: @json($machines),
             technicians: @json($technicians),
             pageIds: @json($pageIds),
@@ -62,13 +67,13 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     {{-- MAIN CONTENT --}}
-    {{-- Gunakan variable $apiToken disini juga --}}
     <div class="py-8 bg-[#F8FAFC] min-h-screen font-sans" x-data="facilitiesData({
         isLogged: {{ Auth::check() ? 'true' : 'false' }},
-        token: '{{ $apiToken }}'
+        token: '{{ $apiToken }}',
+        createUrl: '{{ route('fh.store') }}'
     })">
 
-        {{-- ALERT --}}
+        {{-- ALERT SUCCESS (SESSION) --}}
         @if (session('success'))
             <script>
                 document.addEventListener('DOMContentLoaded', function() {
@@ -99,7 +104,7 @@
         </div>
 
         {{-- MODAL CREATE  --}}
-        <x-index.modal-create :plants="$plants" />
+        <x-index.modal-create :plants="$plants" :machines="$machines" />
 
         {{-- MODAL EDIT / UPDATE --}}
         <x-index.modal-edit />

@@ -4,7 +4,9 @@
     <form action="{{ route('fh.index') }}" method="GET"
         class="flex flex-col xl:flex-row gap-4 justify-between items-end xl:items-center">
 
+        {{-- SEARCH & FILTER SECTION (TETAP SAMA) --}}
         <div class="flex flex-col lg:flex-row gap-3 w-full xl:w-auto flex-1">
+            {{-- Search Input --}}
             <div class="relative w-full lg:w-64 group">
                 <input type="text" name="search" value="{{ request('search') }}" placeholder="Cari tiket..."
                     class="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 text-sm font-medium transition duration-200">
@@ -17,45 +19,38 @@
                 </div>
             </div>
 
+            {{-- Select Category --}}
             <select name="category" onchange="this.form.submit()"
                 class="w-full lg:w-48 rounded-2xl border border-slate-200 bg-slate-50 text-sm py-3 px-4 text-slate-600 font-medium focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 cursor-pointer transition">
                 <option value="">Semua Kategori</option>
                 <option value="Modifikasi Mesin" {{ request('category') == 'Modifikasi Mesin' ? 'selected' : '' }}>
-                    Modifikasi Mesin
-                </option>
+                    Modifikasi Mesin</option>
                 <option value="Pemasangan Mesin" {{ request('category') == 'Pemasangan Mesin' ? 'selected' : '' }}>
-                    Pemasangan Mesin
-                </option>
+                    Pemasangan Mesin</option>
                 <option value="Pembongkaran Mesin" {{ request('category') == 'Pembongkaran Mesin' ? 'selected' : '' }}>
-                    Pembongkaran Mesin
-                </option>
+                    Pembongkaran Mesin</option>
                 <option value="Relokasi Mesin" {{ request('category') == 'Relokasi Mesin' ? 'selected' : '' }}>Relokasi
                     Mesin</option>
-                <option value="Perbaikan" {{ request('category') == 'Perbaikan' ? 'selected' : '' }}>
-                    Perbaikan</option>
+                <option value="Perbaikan" {{ request('category') == 'Perbaikan' ? 'selected' : '' }}>Perbaikan</option>
                 <option value="Pembuatan Alat Baru"
-                    {{ request('category') == 'Pembuatan Alat Baru' ? 'selected' : '' }}>Pembuatan Alat
-                    Baru</option>
+                    {{ request('category') == 'Pembuatan Alat Baru' ? 'selected' : '' }}>Pembuatan Alat Baru</option>
                 <option value="Rakit Steel Drum" {{ request('category') == 'Rakit Steel Drum' ? 'selected' : '' }}>Rakit
-                    Steel Drum
-                </option>
-                <option value="Lain-Lain" {{ request('category') == 'Lain-Lain' ? 'selected' : '' }}>
-                    Lain-Lain</option>
+                    Steel Drum</option>
+                <option value="Lain-Lain" {{ request('category') == 'Lain-Lain' ? 'selected' : '' }}>Lain-Lain</option>
             </select>
 
+            {{-- Select Status --}}
             <select name="status" onchange="this.form.submit()"
                 class="w-full lg:w-40 rounded-2xl border border-slate-200 bg-slate-50 text-sm py-3 px-4 text-slate-600 font-medium focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 cursor-pointer transition">
                 <option value="">Semua Status</option>
-                <option value="pending" {{ request('status') == 'pending' ? 'selected' : '' }}>Pending
+                <option value="pending" {{ request('status') == 'pending' ? 'selected' : '' }}>Pending</option>
+                <option value="in_progress" {{ request('status') == 'in_progress' ? 'selected' : '' }}>In Progress
                 </option>
-                <option value="in_progress" {{ request('status') == 'in_progress' ? 'selected' : '' }}>In
-                    Progress</option>
-                <option value="completed" {{ request('status') == 'completed' ? 'selected' : '' }}>
-                    Completed</option>
-                <option value="cancelled" {{ request('status') == 'cancelled' ? 'selected' : '' }}>
-                    Cancelled</option>
+                <option value="completed" {{ request('status') == 'completed' ? 'selected' : '' }}>Completed</option>
+                <option value="cancelled" {{ request('status') == 'cancelled' ? 'selected' : '' }}>Cancelled</option>
             </select>
 
+            {{-- Select Plant --}}
             <select name="plant_id" onchange="this.form.submit()"
                 class="w-full lg:w-40 rounded-2xl border border-slate-200 bg-slate-50 text-sm py-3 px-4 text-slate-600 font-medium focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 cursor-pointer transition">
                 <option value="">Semua Plant</option>
@@ -66,6 +61,7 @@
                 @endforeach
             </select>
 
+            {{-- Reset Button --}}
             <a href="{{ route('fh.index') }}"
                 class="px-4 py-3 rounded-2xl border border-slate-200 text-slate-500 hover:text-red-500 hover:bg-red-50 hover:border-red-200 transition text-sm font-bold flex items-center justify-center gap-2 bg-white shadow-sm hover:shadow">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -77,9 +73,10 @@
             </a>
         </div>
 
+        {{-- ACTION BUTTONS --}}
         <div class="flex gap-3 w-full lg:w-auto">
 
-            {{-- 1. TOMBOL DASHBOARD (Diproteksi @auth agar tidak crash saat Guest) --}}
+            {{-- 1. TOMBOL DASHBOARD (Hanya muncul jika Login & Admin/SPV) --}}
             @auth
                 @if (in_array(Auth::user()->role, ['fh.admin', 'super.admin']))
                     <a href="{{ route('fh.dashboard') }}"
@@ -93,11 +90,16 @@
                         Dashboard
                     </a>
                 @endif
+
+                {{-- (Opsional) TOMBOL APPROVAL SPV --}}
+                {{-- Tambahkan jika Anda ingin SPV punya akses cepat ke halaman approval --}}
+                {{-- 
+                <a href="{{ route('fh.approval.index') }}" class="...">Approval</a>
+                --}}
             @endauth
 
-            {{-- 2. TOMBOL EXPORT (Menggunakan Alpine x-show="isLoggedIn" agar tersembunyi jika Guest) --}}
+            {{-- 2. TOMBOL EXPORT (Hanya muncul jika Login) --}}
             <button type="button" x-show="isLoggedIn" @click="submitExport()" style="display: none;"
-                {{-- Mencegah kedip saat loading --}}
                 class="px-5 py-3 rounded-2xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 hover:text-green-600 transition flex items-center gap-2 bg-white shadow-sm hover:shadow">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -106,15 +108,16 @@
                 Export
             </button>
 
-            {{-- 3. TOMBOL NEW TICKET (Menggunakan openCreateModalCheck untuk validasi) --}}
-            <button type="button" @click="openCreateModalCheck()"
+            {{-- 3. TOMBOL BUAT TIKET (MODIFIKASI: Bisa diakses Tamu & User) --}}
+            {{-- Hapus check login, langsung buka modal --}}
+            <button type="button" @click="$dispatch('open-create-modal')"
                 class="px-6 py-3 bg-gradient-to-br from-[#1E3A5F] to-[#2d5285] hover:from-[#162c46] hover:to-[#1E3A5F] text-white rounded-2xl font-bold text-sm shadow-lg shadow-blue-900/20 transition transform active:scale-95 flex items-center gap-2">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                 </svg>
-                {{-- Ubah teks tombol sesuai login status (Opsional) --}}
-                <span x-text="isLoggedIn ? 'New Ticket' : 'Login to Create Ticket'">New Ticket</span>
+                <span>Buat Tiket</span>
             </button>
+
         </div>
     </form>
 </div>

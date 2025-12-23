@@ -93,82 +93,121 @@ document.addEventListener('alpine:init', () => {
                 });
             }
         },
-
+        
         async submitToApi() {
-            try {
-                // 1. Validasi Sederhana
-                if (!this.form.plant_id || !this.form.category || !this.form.description) {
-                    Swal.fire('Error', 'Mohon lengkapi data wajib (*)', 'warning');
-                    return;
-                }
+    try {
+        // --- 1. AMBIL NILAI NIK LANGSUNG DARI HTML (SOLUSI ERROR 422) ---
+        // Kita ambil manual agar tidak tergantung pada x-model yang mungkin delay
+        let inputNik = document.getElementById('input_nik');
+        let realNik = inputNik ? inputNik.value : '';
+        let inputNama = document.getElementById('result_name');
+        let realNama = inputNama ? inputNama.value : '';
 
-                // 2. Siapkan Data
-                let formData = new FormData();
-                formData.append('requester_name', this.form.requester_name);
-                formData.append('plant_id', this.form.plant_id);
-                formData.append('category', this.form.category);
-                formData.append('description', this.form.description);
-                formData.append('location_details', 'Area Produksi');
-                
-                if (this.form.target_completion_date) {
-                    formData.append('target_completion_date', this.form.target_completion_date);
-                }
+        // --- 2. VALIDASI ---
+        // Pastikan NIK terisi
+        if (!realNik) {
+            Swal.fire('Error', 'NIK Pelapor wajib diisi!', 'warning');
+            return;
+        }
+        if (!this.form.plant_id || !this.form.category || !this.form.description) {
+            Swal.fire('Error', 'Mohon lengkapi data wajib (*)', 'warning');
+            return;
+        }
 
-                if (this.form.machine_id) formData.append('machine_id', this.form.machine_id);
-                if (this.form.new_machine_name) formData.append('machine_name', this.form.new_machine_name);
-                
-                const fileInput = document.querySelector('input[name="photo"]');
-                if (fileInput && fileInput.files[0]) {
-                    formData.append('photo', fileInput.files[0]);
-                }
+        // --- 3. SIAPKAN FORM DATA ---
+        let formData = new FormData();
+        
+        // PENTING: Append NIK yang tadi kita ambil
+        formData.append('requester_nik', realNik); 
+        formData.append('requester_name', realNama || this.form.requester_name);
+        
+        // Data Standar
+        formData.append('plant_id', this.form.plant_id);
+        formData.append('category', this.form.category);
+        formData.append('description', this.form.description);
+        formData.append('location_details', this.form.location_details || 'Area Produksi');
 
-                // 3. Kirim Request
-                Swal.fire({
-                    title: 'Saving...',
-                    allowOutsideClick: false,
-                    didOpen: () => Swal.showLoading()
-                });
+        // Data Kondisional
+        if (this.form.target_completion_date) {
+            formData.append('target_completion_date', this.form.target_completion_date);
+        }
+        if (this.form.machine_id) {
+            formData.append('machine_id', this.form.machine_id);
+        }
+        if (this.form.new_machine_name) {
+            formData.append('new_machine_name', this.form.new_machine_name);
+        }
 
-                let response = await fetch(config.apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': 'Bearer ' + this.apiToken, // Pakai token dari state
-                        'Accept': 'application/json'
-                    },
-                    body: formData
-                });
+        // Upload Foto
+        const fileInput = document.querySelector('input[name="photo"]');
+        if (fileInput && fileInput.files[0]) {
+            formData.append('photo', fileInput.files[0]);
+        }
 
-                let result = await response.json();
+        // Debugging di Console
+        console.log("Mengirim Data NIK:", realNik);
 
-                if (response.ok) {
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'Success',
-                        text: 'Tiket berhasil dibuat!',
-                        timer: 1500,
-                        showConfirmButton: false
-                    }).then(() => {
-                        window.location.reload();
-                    });
-                    
-                    this.showCreateModal = false;
-                    this.resetForm();
-                } else {
-                    // Handle Token Expired (401)
-                    if (response.status === 401) {
-                         Swal.fire('Session Expired', 'Silakan login ulang', 'error')
-                             .then(() => window.location.href = '/login');
-                         return;
-                    }
-                    console.error('API Error:', result);
-                    Swal.fire('Error', result.message || 'Gagal menyimpan data', 'error');
-                }
+        // --- 4. KIRIM REQUEST ---
+        // Tampilkan Loading
+        Swal.fire({
+            title: 'Sedang Mengirim...',
+            text: 'Mohon tunggu sebentar',
+            allowOutsideClick: false,
+            didOpen: () => Swal.showLoading()
+        });
 
-            } catch (error) {
-                console.error(error);
-                Swal.fire('Error', 'Terjadi kesalahan sistem', 'error');
-            }
-        },
+        // Ambil URL dari config global yang sudah kita set di Blade
+        let url = window.facilitiesConfig.createUrl || '/fh/store';
+
+        let response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                // WAJIB ADA karena route ini ada di web.php
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: formData
+        });
+
+        let result = await response.json();
+
+        // --- 5. HANDLE RESPONSE ---
+        
+        // Cek Error Validasi (422)
+        if (response.status === 422) {
+            console.error("Validation Error:", result.errors);
+            // Ambil pesan error pertama
+            let firstKey = Object.keys(result.errors)[0];
+            let msg = result.errors[firstKey][0];
+            Swal.fire('Gagal Validasi', msg, 'warning');
+            return;
+        }
+
+        if (response.ok) {
+            // SUKSES
+            Swal.fire({
+                icon: 'success',
+                title: 'Berhasil!',
+                text: result.message || 'Tiket berhasil dibuat!',
+                timer: 2000,
+                showConfirmButton: false
+            }).then(() => {
+                window.location.reload();
+            });
+            
+            this.showCreateModal = false;
+            // this.resetForm(); // Opsional
+        } else {
+            // ERROR LAIN (500, dll)
+            console.error('API Error:', result);
+            Swal.fire('Error', result.message || 'Gagal menyimpan data', 'error');
+        }
+
+    } catch (error) {
+        console.error("System Error:", error);
+        Swal.fire('Error', 'Terjadi kesalahan sistem (Cek Console)', 'error');
+    }
+},
         async submitUpdateStatus() {
             // --- 1. VALIDASI FRONTEND ---
             // Jika status 'completed', pastikan tanggal selesai diisi
@@ -390,5 +429,6 @@ document.addEventListener('alpine:init', () => {
             let tech = this.techniciansData.find(t => t.id == id);
             return tech ? tech.name : 'Unknown';
         }
+        
     }));
 });
