@@ -6,19 +6,16 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 
 // --- MODELS ---
 use App\Models\User;
-use App\Models\Employee; // PENTING: Tambahkan Model Employee
+use App\Models\Employee;
 use App\Models\Facilities\WorkOrderFacilities;
 use App\Models\Engineering\Machine;
 use App\Models\Engineering\Plant;
-
-// --- NOTIFICATION ---
-use App\Notifications\NewTicketCreated;
 
 class WorkOrderFacilityController extends Controller
 {
@@ -33,34 +30,48 @@ class WorkOrderFacilityController extends Controller
     // --- 2. GET SINGLE TICKET ---
     public function show($id)
     {
-        // Asumsi: NIK dan Divisi ada di tabel 'users' yang berelasi dengan work_order
-        // Atau jika ada langsung di tabel work_orders, sesuaikan saja field-nya.
-        $workOrder = WorkOrder::with('user')->findOrFail($id);
+        $workOrder = WorkOrderFacilities::with(['technicians', 'machine', 'plant'])
+            ->findOrFail($id);
 
         return response()->json([
             'id' => $workOrder->id,
-            'ticket_number' => $workOrder->ticket_number,
-            'title' => $workOrder->title,
+            'ticket_num' => $workOrder->ticket_num,
+            'requester_name' => $workOrder->requester_name,
+            'requester_nik' => $workOrder->requester_nik,
+            'requester_division' => $workOrder->requester_division,
+            'plant' => $workOrder->plant,
+            'machine' => $workOrder->machine,
             'description' => $workOrder->description,
+            'category' => $workOrder->category,
             'status' => $workOrder->status,
-            // Tambahkan data User
-            'requester_name' => $workOrder->user->name,
-            'nik' => $workOrder->user->nik,        // Pastikan kolom ini ada di DB
-            'divisi' => $workOrder->user->divisi,  // Pastikan kolom ini ada di DB
+            'internal_status' => $workOrder->internal_status,
+            'technicians' => $workOrder->technicians,
+            'photo_path' => $workOrder->photo_path,
+            'report_date' => $workOrder->report_date,
+            'target_completion_date' => $workOrder->target_completion_date,
+            'actual_completion_date' => $workOrder->actual_completion_date,
         ]);
     }
 
-    // --- 3. CREATE TICKET (MODIFIED FOR GUEST + NIK) ---
+    // --- 3. CREATE MULTIPLE TICKETS (MODIFIED FOR MULTIPLE REQUESTERS) ---
     public function store(Request $request)
     {
+        Log::info('🎯 Store method called', [
+            'all_data' => $request->all(),
+            'files' => $request->allFiles()
+        ]);
+
         // A. VALIDASI INPUT
         $rules = [
-            'requester_nik'  => 'required|exists:employees,nik', // WAJIB ADA DI TABLE EMPLOYEE
-            'requester_name' => 'required|string',
-            'plant_id'       => 'required',
-            'description'    => 'required',
-            'category'       => 'required',
-            'photo'          => 'image|max:5120'
+            'requester_nik.*'     => 'required|exists:employees,nik',
+            'requester_name.*'    => 'required|string',
+            'requester_division.*' => 'required|string',
+            'plant_id'            => 'required|exists:plants,id',
+            'description'         => 'required|string',
+            'category'            => 'required|string',
+            'photo'               => 'nullable|image|max:5120',
+            'target_completion_date' => 'nullable|date',
+            'sub_plant'           => 'nullable|string|in:A,B,C,D,E,F',
         ];
 
         // Validasi Kondisional Mesin
@@ -73,24 +84,69 @@ class WorkOrderFacilityController extends Controller
             'Perbaikan Mesin',
             'Pembuatan Alat Baru'
         ])) {
-            $rules['machine_id'] = 'required';
+            $rules['machine_id'] = 'required|exists:machines,id';
         }
 
-        $request->validate($rules);
+        $validated = $request->validate($rules);
 
-        // B. CEK DATA KARYAWAN (AUTO-FILL BACKEND)
-        $employee = Employee::where('nik', $request->requester_nik)->first();
-        if (!$employee) {
-            return response()->json(['message' => 'Data Karyawan Tidak Ditemukan'], 422);
+        // B. CEK APAKAH ADA MINIMAL 1 PELAPOR
+        if (!$request->has('requester_nik') || count($request->requester_nik) === 0) {
+            return response()->json([
+                'message' => 'Minimal 1 pelapor harus diisi',
+                'errors' => ['requester_nik' => ['Pelapor tidak boleh kosong']]
+            ], 422);
         }
 
-        // C. UPLOAD FOTO
+        // C. UPLOAD FOTO (JIKA ADA)
         $photoPath = null;
         if ($request->hasFile('photo')) {
-            $photoPath = $request->file('photo')->store('wo_facilities', 'public');
+            try {
+                $photoPath = $request->file('photo')->store('wo_facilities', 'public');
+                Log::info('✅ Photo uploaded', ['path' => $photoPath]);
+            } catch (\Exception $e) {
+                Log::error('❌ Photo upload failed', ['error' => $e->getMessage()]);
+            }
         }
 
-        // D. GENERATE NOMOR TIKET
+        // D. GET PLANT INFO
+        $plant = Plant::findOrFail($request->plant_id);
+        $plantName = $plant->name;
+
+        // Add sub_plant info if exists
+        if ($request->filled('sub_plant')) {
+            $plantName .= ' - Plant ' . $request->sub_plant;
+        }
+
+        // E. LOGIKA MACHINE
+        $machineId = null;
+        $machineName = null;
+
+        if ($request->category == 'Pemasangan Mesin') {
+            // Buat mesin baru
+            $machineData = [
+                'plant_id' => $request->plant_id,
+                'name' => $request->new_machine_name,
+            ];
+
+            // Tambahkan sub_plant jika ada
+            if ($request->filled('sub_plant')) {
+                $machineData['sub_plant'] = $request->sub_plant;
+            }
+
+            $newMachine = Machine::create($machineData);
+            $machineId = $newMachine->id;
+            $machineName = $newMachine->name;
+            Log::info('✅ New machine created', ['machine' => $newMachine]);
+        } elseif ($request->filled('machine_id')) {
+            // Gunakan mesin yang sudah ada
+            $machine = Machine::find($request->machine_id);
+            if ($machine) {
+                $machineId = $machine->id;
+                $machineName = $machine->name;
+            }
+        }
+
+        // F. GENERATE TICKET NUMBER BASE
         $bulanIndo = [
             '01' => 'JAN',
             '02' => 'FEB',
@@ -111,83 +167,299 @@ class WorkOrderFacilityController extends Controller
         $dateCode = $hari . $bulanIndo[$bulan] . $tahun;
         $prefix = 'FAC-' . $dateCode . '-';
 
+        // Get last sequence number
         $lastTicket = WorkOrderFacilities::where('ticket_num', 'like', $prefix . '%')
-            ->orderBy('id', 'desc')->first();
-        $newSeq = $lastTicket ? ((int)substr($lastTicket->ticket_num, -3) + 1) : 1;
-        $ticketNum = $prefix . sprintf('%03d', $newSeq);
+            ->orderBy('id', 'desc')
+            ->first();
+        $currentSeq = $lastTicket ? ((int)substr($lastTicket->ticket_num, -3)) : 0;
 
-        // E. LOGIKA PLANT & MACHINE
-        $plantName = '-';
-        if ($p = Plant::find($request->plant_id)) {
-            $plantName = $p->name;
-        }
+        // G. LOOP UNTUK SETIAP PELAPOR - BUAT 1 TIKET PER ORANG
+        $createdTickets = [];
+        $requesterNiks = $request->requester_nik;
+        $requesterNames = $request->requester_name;
+        $requesterDivisions = $request->requester_division;
 
-        $machineId = null;
-        $machineName = null;
+        DB::beginTransaction();
 
-        if ($request->category == 'Pemasangan Mesin') {
-            $newMachine = Machine::create([
-                'plant_id' => $request->plant_id,
-                'name' => $request->new_machine_name,
-                'code' => 'NEW-' . strtoupper(Str::random(5)),
-            ]);
-            $machineId = $newMachine->id;
-            $machineName = $newMachine->name;
-        } else {
-            if ($request->filled('machine_id')) {
-                $m = Machine::find($request->machine_id);
-                if ($m) {
-                    $machineId = $m->id;
-                    $machineName = $m->name;
+        try {
+            foreach ($requesterNiks as $index => $nik) {
+                // Generate unique ticket number for each requester
+                $currentSeq++;
+                $ticketNum = $prefix . sprintf('%03d', $currentSeq);
+
+                // Verify employee exists
+                $employee = Employee::where('nik', $nik)->first();
+                if (!$employee) {
+                    Log::warning('⚠️ Employee not found', ['nik' => $nik]);
+                    continue; // Skip this employee
                 }
+
+                // Create work order
+                $wo = new WorkOrderFacilities();
+                $wo->ticket_num = $ticketNum;
+                $wo->requester_id = Auth::id(); // NULL if guest
+                $wo->requester_nik = $nik;
+                $wo->requester_name = $requesterNames[$index] ?? $employee->name;
+                $wo->requester_division = $requesterDivisions[$index] ?? $employee->department;
+                $wo->plant = $plantName;
+                $wo->machine_id = $machineId;
+                $wo->machine_name = $machineName;
+                $wo->location_details = $request->location_detail ?? '-';
+                $wo->report_date = $request->report_date ? Carbon::parse($request->report_date) : now();
+                $wo->description = $request->description;
+                $wo->category = $request->category;
+                $wo->target_completion_date = $request->target_completion_date ? Carbon::parse($request->target_completion_date) : null;
+                $wo->photo_path = $photoPath;
+
+                // STATUS WORKFLOW
+                $wo->status = 'pending';
+                $wo->internal_status = 'waiting_spv'; // Menunggu approval supervisor
+
+                $wo->save();
+
+                $createdTickets[] = [
+                    'ticket_num' => $ticketNum,
+                    'requester_name' => $wo->requester_name,
+                    'requester_nik' => $nik,
+                ];
+
+                Log::info('✅ Ticket created', [
+                    'ticket_num' => $ticketNum,
+                    'requester' => $wo->requester_name
+                ]);
             }
+
+            DB::commit();
+
+            Log::info('✅ All tickets created successfully', [
+                'count' => count($createdTickets),
+                'tickets' => $createdTickets
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => count($createdTickets) . ' tiket berhasil dibuat. Menunggu persetujuan SPV.',
+                'data' => $createdTickets
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::error('❌ Error creating tickets', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal membuat tiket: ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // --- 4. UPDATE STATUS TICKET ---
+    public function updateStatus(Request $request, $id)
+    {
+        $wo = WorkOrderFacilities::findOrFail($id);
+
+        $validated = $request->validate([
+            'status' => 'required|in:pending,in_progress,completed,cancelled',
+            'note' => 'nullable|string',
+            'actual_completion_date' => 'nullable|date',
+            'start_date' => 'nullable|date',
+            'facility_tech_ids' => 'nullable|array',
+            'facility_tech_ids.*' => 'exists:facility_technicians,id',
+        ]);
+
+        // Update status
+        $wo->status = $request->status;
+
+        if ($request->filled('start_date')) {
+            $wo->start_date = Carbon::parse($request->start_date);
         }
 
-        // F. SIMPAN DATA KE DATABASE
-        $wo = new WorkOrderFacilities();
-        $wo->ticket_num = $ticketNum;
+        if ($request->filled('actual_completion_date')) {
+            $wo->actual_completion_date = Carbon::parse($request->actual_completion_date);
+        }
 
-        // --- PERUBAHAN UTAMA DI SINI ---
-        $wo->requester_id = Auth::id(); // Akan NULL jika Guest (Pastikan kolom DB nullable)
-        $wo->requester_nik = $employee->nik;
-        $wo->requester_name = $employee->name;
-        $wo->requester_division = $employee->department; // Penting untuk Approval SPV
-        // -------------------------------
+        if ($request->filled('note')) {
+            $wo->completion_note = $request->note;
+        }
 
-        $wo->plant = $plantName;
-        $wo->machine_id = $machineId;
-        $wo->machine_name = $machineName;
-        $wo->location_details = $request->location_detail ?? '-';
-        $wo->report_date = $request->report_date ? Carbon::parse($request->report_date) : now();
-        $wo->description = $request->description;
-        $wo->category = $request->category;
-        $wo->target_completion_date = $request->target_completion_date;
-        $wo->photo_path = $photoPath;
-
-        // STATUS BERJENJANG (TIERED APPROVAL)
-        $wo->status = 'draft';
-        $wo->internal_status = 'waiting_spv'; // Menunggu SPV Approve
+        // Update internal status based on status
+        if ($request->status === 'in_progress') {
+            $wo->internal_status = 'approved';
+        } elseif ($request->status === 'completed') {
+            $wo->internal_status = 'completed';
+        }
 
         $wo->save();
 
-        // G. RETURN RESPONSE JSON
+        // Sync technicians if provided
+        if ($request->has('facility_tech_ids')) {
+            $wo->technicians()->sync($request->facility_tech_ids);
+        }
+
+        Log::info('✅ Ticket updated', [
+            'ticket_num' => $wo->ticket_num,
+            'status' => $wo->status
+        ]);
+
         return response()->json([
-            'message' => 'Tiket berhasil dibuat. Menunggu persetujuan SPV ' . $employee->department,
-            'data' => $wo
-        ], 201);
+            'success' => true,
+            'message' => 'Status tiket berhasil diperbarui',
+            'data' => $wo->load('technicians')
+        ]);
     }
 
-    // --- 4. UPDATE TICKET ---
-    public function update(Request $request, $id)
+    // --- 5. APPROVE TICKET (BY SUPERVISOR) ---
+    public function approve($id)
     {
         $wo = WorkOrderFacilities::findOrFail($id);
-        $wo->update($request->all());
-        return response()->json(['message' => 'Updated', 'data' => $wo]);
+
+        // Check if ticket is waiting for approval
+        if ($wo->internal_status !== 'waiting_spv') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tiket ini tidak dalam status menunggu approval'
+            ], 400);
+        }
+
+        // Update status
+        $wo->internal_status = 'approved';
+        $wo->status = 'pending'; // Ready to be worked on
+        $wo->save();
+
+        Log::info('✅ Ticket approved', [
+            'ticket_num' => $wo->ticket_num,
+            'approved_by' => Auth::user()->name ?? 'System'
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Tiket berhasil disetujui',
+            'data' => $wo
+        ]);
     }
 
-    // --- 5. EXPORT ---
-    public function export(Request $request)
+    // --- 6. DECLINE TICKET (BY SUPERVISOR) ---
+    public function decline($id)
     {
-        return response()->json(['message' => 'Export logic placeholder']);
+        $wo = WorkOrderFacilities::findOrFail($id);
+
+        // Check if ticket is waiting for approval
+        if ($wo->internal_status !== 'waiting_spv') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tiket ini tidak dalam status menunggu approval'
+            ], 400);
+        }
+
+        // Update status
+        $wo->internal_status = 'declined';
+        $wo->status = 'cancelled';
+        $wo->save();
+
+        Log::info('⚠️ Ticket declined', [
+            'ticket_num' => $wo->ticket_num,
+            'declined_by' => Auth::user()->name ?? 'System'
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Tiket ditolak',
+            'data' => $wo
+        ]);
+    }
+
+    // --- 7. GET MACHINES BY PLANT (WITH SUB PLANT FILTER) ---
+    public function getMachinesByPlant($plantId, Request $request)
+    {
+        try {
+            Log::info('🔍 Fetching machines', [
+                'plant_id' => $plantId,
+                'sub_plant' => $request->sub_plant ?? 'none'
+            ]);
+
+            // Validate plant exists
+            $plant = Plant::find($plantId);
+            if (!$plant) {
+                Log::warning('⚠️ Plant not found', ['plant_id' => $plantId]);
+                return response()->json([]);
+            }
+
+            // Build query - Simple and clean
+            $query = Machine::where('plant_id', $plantId);
+
+            // Filter by sub_plant if provided (for PE and MT plants)
+            if ($request->filled('sub_plant')) {
+                $query->where('sub_plant', $request->sub_plant);
+                Log::info('📍 Filtering by sub_plant', ['sub_plant' => $request->sub_plant]);
+            }
+
+            // Get machines - only id and name
+            $machines = $query->orderBy('name', 'asc')->get(['id', 'name']);
+
+            Log::info('✅ Machines fetched', [
+                'count' => $machines->count(),
+                'plant_name' => $plant->name
+            ]);
+
+            return response()->json($machines);
+        } catch (\Exception $e) {
+            Log::error('❌ Error fetching machines', [
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'error' => 'Gagal memuat data mesin'
+            ], 500);
+        }
+    }
+
+    // --- 8. GET EMPLOYEE BY NIK ---
+    public function getEmployeeByNik($nik)
+    {
+        Log::info('🔍 Fetching employee', ['nik' => $nik]);
+
+        $employee = Employee::where('nik', $nik)->first();
+
+        if (!$employee) {
+            Log::warning('⚠️ Employee not found', ['nik' => $nik]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Karyawan tidak ditemukan'
+            ], 404);
+        }
+
+        Log::info('✅ Employee found', ['name' => $employee->name]);
+
+        return response()->json([
+            'nik' => $employee->nik,
+            'name' => $employee->name,
+            'department' => $employee->department,
+            'department_name' => $employee->department_name ?? $employee->department,
+        ]);
+    }
+
+    // --- 9. DELETE TICKET ---
+    public function destroy($id)
+    {
+        $wo = WorkOrderFacilities::findOrFail($id);
+
+        // Delete photo if exists
+        if ($wo->photo_path && \Storage::disk('public')->exists($wo->photo_path)) {
+            \Storage::disk('public')->delete($wo->photo_path);
+        }
+
+        $wo->delete();
+
+        Log::info('🗑️ Ticket deleted', ['ticket_num' => $wo->ticket_num]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Tiket berhasil dihapus'
+        ]);
     }
 }

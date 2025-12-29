@@ -94,7 +94,8 @@
 
         <div class="max-w-[95rem] mx-auto sm:px-6 lg:px-8 space-y-8">
             {{-- 1. STATS OVERVIEW --}}
-            <x-index.stats-card :countTotal="$countTotal" :countPending="$countPending" :countProgress="$countProgress" :countDone="$countDone" />
+            <x-index.stats-card :countTotal="$countTotal" :countWaitingSpv="$countWaitingSpv" :countPending="$countPending" :countProgress="$countProgress"
+                :countDone="$countDone" />
 
             {{-- 2. TOOLBAR --}}
             <x-index.toolbar :plants="$plants" />

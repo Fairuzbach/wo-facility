@@ -2,32 +2,37 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use App\Models\Employee;
 
 class EmployeeSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
     public function run(): void
     {
-        //
-        // 1. Staff Biasa (Yang Lapor)
-        Employee::create([
-            'nik' => '12345',
-            'name' => 'Budi Staff Engineer',
-            'department' => 'ENGINEERING',
-            'position' => 'STAFF'
-        ]);
+        $departments = ['ENGINEERING', 'PRODUCTION', 'MAINTENANCE', 'QUALITY CONTROL', 'HRD', 'IT'];
+        $positions = ['STAFF', 'OPERATOR', 'SPV', 'FOREMAN'];
 
-        // 2. SPV (Yang Approve)
-        Employee::create([
-            'nik' => '99999',
-            'name' => 'Pak Bos Engineer',
-            'department' => 'ENGINEERING',
-            'position' => 'SPV'
-        ]);
+        // Agar NIK tidak bentrok saat proses looping
+        $usedNiks = [];
+
+        $this->command->info('Sedang membuat 100 data karyawan...');
+
+        for ($i = 1; $i <= 100; $i++) {
+            do {
+                // Membuat NIK acak 3 sampai 4 angka (100 - 9999)
+                $nik = rand(100, 9999);
+            } while (in_array($nik, $usedNiks));
+
+            $usedNiks[] = $nik;
+
+            Employee::create([
+                'nik'        => (string)$nik,
+                'name'       => 'Employee ' . $nik,
+                'department' => $departments[array_rand($departments)],
+                'position'   => $positions[array_rand($positions)]
+            ]);
+        }
+
+        $this->command->info('✅ Berhasil menambahkan 100 data karyawan.');
     }
 }

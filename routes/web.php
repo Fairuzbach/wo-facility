@@ -19,15 +19,12 @@ Route::get('/api/employee/{nik}', function ($nik) {
 
 // --- 3. GROUP FACILITY (FH) ---
 Route::prefix('fh')->name('fh.')->group(function () {
-
     // === A. PUBLIC ROUTES (Bisa Diakses Guest / Tanpa Login) ===
-
     // 1. Halaman Utama Facility (List Tiket Public)
     Route::get('/', [FacilitiesController::class, 'index'])->name('index');
 
     // 2. Action Simpan Tiket (PENTING: Ini harus di luar middleware auth)
     Route::post('/store', [FacilitiesController::class, 'store'])->name('store');
-
 
     // === B. PROTECTED ROUTES (Wajib Login: Admin & SPV) ===
     Route::middleware('auth')->group(function () {
@@ -39,7 +36,7 @@ Route::prefix('fh')->name('fh.')->group(function () {
         Route::get('/export', [FacilitiesController::class, 'export'])->name('export');
 
         // Update Status (Dilakukan oleh Admin Facility)
-        Route::put('/{id}/update-status', [FacilitiesController::class, 'updateStatus'])->name('update-status');
+        Route::put('/{id}/update-status', [FacilitiesController::class, 'updateStatus'])->middleware('can:access-fh.admin')->name('update-status');
 
         // Approval Index
         Route::get('/approval', [FacilitiesController::class, 'approvalIndex'])->name('approval.index');
@@ -48,7 +45,7 @@ Route::prefix('fh')->name('fh.')->group(function () {
         Route::post('/approve/{id}', [FacilitiesController::class, 'approve'])->name('approve');
 
         // Route Decline
-        Route::post('/fh/decline/{id}', [FacilitiesController::class, 'decline'])->name('decline');
+        Route::post('/decline/{id}', [FacilitiesController::class, 'decline'])->name('decline');
     });
 });
 

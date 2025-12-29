@@ -13,10 +13,38 @@ class WorkOrderFacilities extends Model
     use HasFactory;
 
     protected $table = 'work_order_facilities';
-    protected $guarded = ['id'];
+    protected $fillable = [
+        'ticket_num',
+        'requester_id', // Jika ada
+        'requester_nik',
+        'requester_name',
+        'requester_division',
+        'requester_email',
+        'plant',
+        'plant_id',
+        'category',
+        'description',
 
+        'machine_id',
+        'new_machine_name', // <--- INI KUNCINYA
+
+        'photo_path',
+        'status',
+        'internal_status',
+        'target_completion_date',
+        'actual_completion_date',
+        'start_date',
+        'completion_note',
+        'processed_by',
+        'processed_by_name'
+    ];
+    protected $casts = [
+        'actual_completion_date' => 'datetime',
+        'target_completion_date' => 'datetime',
+        'created_at' => 'datetime',
+    ];
     // Agar NIK & Divisi muncul di JSON Modal (AlpineJS)
-    protected $appends = ['nik_pelapor', 'divisi_pelapor', 'requester_name'];
+    protected $appends = ['nik_pelapor', 'divisi_pelapor', 'requester_name', 'tanggal_selesai_indo'];
 
     // ==========================================
     // 1. RELASI USER (Hybrid: Login & Guest)
@@ -86,6 +114,15 @@ class WorkOrderFacilities extends Model
             'work_order_facility_id',   // FK model ini
             'facility_tech_id'          // FK model target
         );
+    }
+
+    public function getTanggalSelesaiIndoAttribute()
+    {
+        if (!$this->actual_completion_date) {
+            return null;
+        }
+
+        return \Carbon\Carbon::parse($this->actual_completion_date)->translatedFormat('d F Y, H:i') . 'WIB';
     }
 
     // Relasi ke Mesin

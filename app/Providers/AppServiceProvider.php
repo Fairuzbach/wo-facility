@@ -2,10 +2,9 @@
 
 namespace App\Providers;
 
-use App\Events\TicketCreated;
-use App\Listeners\SendTicketNotification;
-// use Illuminate\Support\Facades\Event; // <--- PENTING: Tambahkan Facade Event
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Gate; // <--- WAJIB DI IMPORT
+use App\Models\User;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -22,7 +21,21 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // --- DAFTARKAN EVENT DI SINI ---
+        // === DEFINISI GATE DISINI (KHUSUS LARAVEL 11) ===
 
+        Gate::define('access-fh.admin', function ($user) {
+
+            // Cek 1: Role spesifik
+            if ($user->role === 'fh.admin') {
+                return true;
+            }
+
+            // Cek 2: Role admin biasa + Divisi Facility
+            if ($user->role === 'admin' && ($user->divisi === 'Facility' || $user->divisi === 'FH')) {
+                return true;
+            }
+
+            return false;
+        });
     }
 }

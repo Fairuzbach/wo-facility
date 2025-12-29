@@ -48,6 +48,8 @@
                 </option>
                 <option value="completed" {{ request('status') == 'completed' ? 'selected' : '' }}>Completed</option>
                 <option value="cancelled" {{ request('status') == 'cancelled' ? 'selected' : '' }}>Cancelled</option>
+                <option value="waiting_spv" {{ request('status') == 'waiting_spv' ? 'selected' : '' }}>Need Approval
+                </option>
             </select>
 
             {{-- Select Plant --}}
