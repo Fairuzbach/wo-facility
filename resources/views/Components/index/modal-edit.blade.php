@@ -1,7 +1,13 @@
+@props(['technicians'])
+
 <template x-teleport="body">
-    <div x-show="showEditModal" class="fixed inset-0 z-50 overflow-y-auto" style="display: none;">
+    {{-- PANGGIL KOMPONEN JS DI SINI --}}
+    <div x-data="facilityEdit" x-show="showEditModal" @open-edit-modal.window="openModal($event.detail)"
+        {{-- Oper data teknisi dari PHP ke JS --}} x-init="techniciansData = {{ Js::from($technicians) }}" class="fixed inset-0 z-50 overflow-y-auto" style="display: none;">
+
         <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" @click="showEditModal = false">
         </div>
+
         <div class="flex min-h-full items-center justify-center p-4">
             <div
                 class="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-visible transform transition-all">
@@ -14,7 +20,7 @@
                         class="text-white/60 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition">&times;</button>
                 </div>
 
-                <form x-bind:action="'/fh/' + editForm.id + '/update-status'" method="POST" class="p-8 space-y-6">
+                <form :action="'/fh/' + editForm.id + '/update-status'" method="POST" class="p-8 space-y-6">
                     @csrf @method('PUT')
 
                     {{-- Dropdown Teknisi --}}
@@ -54,23 +60,9 @@
                         </div>
                     </div>
 
-                    {{-- Selected Tags --}}
-                    <div class="flex flex-wrap gap-2" x-show="editForm.selectedTechs.length > 0">
-                        <template x-for="id in editForm.selectedTechs" :key="id">
-                            <span
-                                class="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-xs font-bold border border-blue-100 flex items-center gap-2 shadow-sm">
-                                <span x-text="getTechName(id)"></span>
-                                <button type="button" @click="toggleTech(id)"
-                                    class="hover:text-red-500 transition">&times;</button>
-                                <input type="hidden" name="facility_tech_ids[]" :value="id">
-                            </span>
-                        </template>
-                    </div>
-
                     {{-- Status Dropdown --}}
                     <div>
                         <label class="block text-sm font-bold text-slate-700 mb-2">Status</label>
-                        {{-- Hapus ID statusSelect, cukup andalkan x-model --}}
                         <select name="status" x-model="editForm.status"
                             class="w-full rounded-xl border-slate-200 text-sm py-3 px-4 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition font-medium text-slate-700">
                             <option value="pending">Pending</option>
@@ -80,56 +72,42 @@
                         </select>
                     </div>
 
-                    {{-- PERBAIKAN: Input Cancellation Note (Murni Alpine JS) --}}
-                    <div x-show="editForm.status === 'cancelled'" x-transition:enter="transition ease-out duration-300"
-                        x-transition:enter-start="opacity-0 transform -translate-y-2"
-                        x-transition:enter-end="opacity-100 transform translate-y-0" class="mb-4">
+                    {{-- Cancellation Note --}}
+                    <div x-show="editForm.status === 'cancelled'" x-transition class="mb-4">
                         <label class="font-bold text-sm text-red-600">Alasan Pembatalan <span
                                 class="text-red-500">*</span></label>
-
-                        {{-- Tambahkan :required agar validasi browser jalan otomatis --}}
-                        {{-- Tambahkan x-model jika ingin sinkron dengan object JS, atau biarkan name untuk submit form biasa --}}
                         <textarea name="completion_note" x-model="editForm.completion_note" :required="editForm.status === 'cancelled'"
-                            class="w-full border p-2 rounded border-red-300 focus:ring-red-500 focus:border-red-500"
-                            placeholder="Contoh: Stok sparepart kosong / Laporan duplikat..." rows="3"></textarea>
+                            class="w-full border p-2 rounded border-red-300 focus:ring-red-500 focus:border-red-500" rows="3"></textarea>
                     </div>
 
-                    {{-- Input Completed Note --}}
-                    <div x-show="editForm.status === 'completed'" x-transition:enter="transition ease-out duration-300"
-                        x-transition:enter-start="opacity-0 transform -translate-y-2"
-                        x-transition:enter-end="opacity-100 transform translate-y-0"
+                    {{-- Completion Note --}}
+                    <div x-show="editForm.status === 'completed'" x-transition
                         class="mb-4 bg-green-50 p-4 rounded-xl border border-green-100">
-
-                        <label class="block text-sm font-semibold text-green-800 mb-1">
-                            Catatan Penyelesaian <span class="text-green-600 font-normal">(Opsional)</span>
-                        </label>
-
+                        <label class="block text-sm font-semibold text-green-800 mb-1">Catatan Penyelesaian</label>
                         <textarea name="note" x-model="editForm.note" rows="3"
-                            placeholder="Contoh: Mesin sudah diganti bearing baru..."
-                            class="w-full rounded-xl border-green-200 focus:border-green-500 focus:ring-green-500 text-sm bg-white"></textarea>
+                            class="w-full rounded-xl border-green-200 focus:border-green-500 text-sm"></textarea>
                     </div>
 
                     {{-- Dates --}}
                     <div x-show="editForm.status == 'in_progress' || editForm.status == 'completed'" x-transition>
                         <label class="block text-sm font-bold text-slate-700 mb-2">Tanggal Mulai</label>
                         <input type="text" name="start_date" x-model="editForm.start_date"
-                            class="w-full rounded-xl border-slate-200 text-sm py-3 px-4 bg-slate-50 date-picker-edit focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition"
+                            class="w-full rounded-xl border-slate-200 text-sm py-3 px-4 bg-slate-50 date-picker-edit"
                             placeholder="YYYY-MM-DD">
                     </div>
                     <div x-show="editForm.status == 'completed'" x-transition>
                         <label class="block text-sm font-bold text-emerald-700 mb-2">Tanggal Selesai (Actual)</label>
                         <input type="text" name="actual_completion_date" x-model="editForm.actual_completion_date"
-                            class="w-full rounded-xl border-emerald-200 bg-emerald-50 text-emerald-800 text-sm py-3 px-4 date-picker-edit font-bold focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition"
-                            placeholder="YYYY-MM-DD" :required="editForm.status == 'completed'">
+                            class="w-full rounded-xl border-emerald-200 bg-emerald-50 text-emerald-800 text-sm py-3 px-4 date-picker-edit font-bold"
+                            placeholder="YYYY-MM-DD">
                     </div>
 
-                    <button type="submit" @click="submitUpdateStatus()"
-                        class="w-full py-3.5 bg-gradient-to-br from-[#1E3A5F] to-[#2d5285] text-white rounded-xl font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition transform">Save
-                        Changes</button>
+                    <button type="button" @click="submitUpdateStatus()"
+                        class="w-full py-3.5 bg-gradient-to-br from-[#1E3A5F] to-[#2d5285] text-white rounded-xl font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition transform">
+                        Save Changes
+                    </button>
                 </form>
             </div>
         </div>
     </div>
 </template>
-
-{{-- SCRIPT DI BAWAH SUDAH DIHAPUS KARENA TIDAK PERLU --}}

@@ -13,8 +13,20 @@ Route::get('/', function () {
 
 // --- 2. API helper untuk NIK (Agar Javascript Check NIK jalan) ---
 // Letakkan di sini agar tidak kena middleware auth
-Route::get('/api/employee/{nik}', function ($nik) {
-    return Employee::where('nik', $nik)->first();
+Route::get('/check-employee/{nik}', function ($nik) {
+    // Cari data karyawan berdasarkan NIK
+    $employee = Employee::where('nik', $nik)->first();
+
+    if ($employee) {
+        return response()->json([
+            'success'  => true,
+            'name'     => $employee->name, // Pastikan kolom di DB adalah 'name'
+            // Sesuaikan kolom divisi (bisa 'department', 'division', atau 'unit')
+            'division' => $employee->department ?? $employee->division ?? '-'
+        ]);
+    }
+
+    return response()->json(['success' => false], 200);
 });
 
 // --- 3. GROUP FACILITY (FH) ---

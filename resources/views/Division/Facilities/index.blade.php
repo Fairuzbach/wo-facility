@@ -33,23 +33,13 @@
     {{-- LIBRARIES --}}
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 
-    {{-- 2. KONFIGURASI JAVASCRIPT GLOBAL --}}
+    {{-- KONFIGURASI JAVASCRIPT GLOBAL --}}
     <script>
         window.facilitiesConfig = {
-            // Status Login
             isLoggedIn: {{ Auth::check() ? 'true' : 'false' }},
-
-            // Token (Kosong jika tamu)
             apiToken: "{{ $apiToken }}",
-
-            // URL PENTING:
-            // 1. createUrl: Mengarah ke Public Route di web.php
             createUrl: "{{ route('fh.store') }}",
-
-            // 2. apiUrl: Mengarah ke API Admin (jika diperlukan untuk edit/update)
             apiUrl: "{{ url('/api/facility-wo') }}",
-
-            // Data Pendukung
             machines: @json($machines),
             technicians: @json($technicians),
             pageIds: @json($pageIds),
@@ -61,17 +51,14 @@
         };
     </script>
 
-    @vite(['resources/css/facilities.css', 'resources/js/facilities.js'])
+    @vite(['resources/css/facilities.css'])
 
+    {{-- <script type="module" src="{{ asset('js/facilities/index.js') }}"></script> --}}
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     {{-- MAIN CONTENT --}}
-    <div class="py-8 bg-[#F8FAFC] min-h-screen font-sans" x-data="facilitiesData({
-        isLogged: {{ Auth::check() ? 'true' : 'false' }},
-        token: '{{ $apiToken }}',
-        createUrl: '{{ route('fh.store') }}'
-    })">
+    <div class="py-8 bg-[#F8FAFC] min-h-screen font-sans" x-data="facilityToolbar">
 
         {{-- ALERT SUCCESS (SESSION) --}}
         @if (session('success'))
@@ -108,7 +95,7 @@
         <x-index.modal-create :plants="$plants" :machines="$machines" />
 
         {{-- MODAL EDIT / UPDATE --}}
-        <x-index.modal-edit />
+        <x-index.modal-edit :technicians="$technicians" />
 
         {{-- MODAL DETAIL (VIEW) --}}
         <x-index.modal-detail />
