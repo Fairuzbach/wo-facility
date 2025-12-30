@@ -177,23 +177,34 @@
                             </div>
                         </div>
 
-                        {{-- Section Mesin --}}
+                        {{-- Section Mesin (Wrapper) --}}
+                        {{-- Muncul untuk semua kategori yang butuh data mesin (baik baru maupun lama) --}}
                         <div x-show="showMachineSection" x-transition
                             class="mb-6 bg-blue-50/50 p-6 rounded-2xl border border-blue-100">
 
-                            {{-- Case 1: Pemasangan Mesin Baru --}}
-                            <template x-if="form.category === 'Pemasangan Mesin'">
+                            {{-- A. JIKA KATEGORI = "PEMASANGAN MESIN" (INPUT MANUAL) --}}
+                            {{-- Gunakan x-if untuk memastikan blok ini eksklusif --}}
+                            <template x-if="isNewMachineInstallation">
                                 <div class="space-y-4">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span
+                                            class="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded border border-green-200">MODE
+                                            PEMASANGAN BARU</span>
+                                    </div>
+
+                                    {{-- Input Nama Mesin Baru --}}
                                     <div>
                                         <label class="block text-xs font-bold text-blue-700 uppercase mb-2">Nama Mesin
-                                            Baru</label>
+                                            Baru <span class="text-red-500">*</span></label>
                                         <input type="text" x-model="new_machine_name"
-                                            class="w-full rounded-xl border-blue-200 focus:border-blue-500 focus:ring-blue-500"
-                                            placeholder="Masukkan nama mesin baru...">
+                                            class="w-full rounded-xl border-blue-200 focus:border-blue-500 focus:ring-blue-500 font-bold text-slate-700"
+                                            placeholder="Contoh: CNC Lathe X1 (New)">
                                     </div>
-                                    <div>
+
+                                    {{-- Input Lokasi Pemasangan (Target Plant) --}}
+                                    {{-- <div>
                                         <label class="block text-xs font-bold text-blue-700 uppercase mb-2">Lokasi
-                                            Pemasangan</label>
+                                            Pemasangan <span class="text-red-500">*</span></label>
                                         <select x-model="target_plant_id"
                                             class="w-full rounded-xl border-blue-200 py-3 px-4 bg-white font-bold text-slate-700">
                                             <option value="">-- Pilih Lokasi Pasang --</option>
@@ -201,25 +212,72 @@
                                                 <option :value="plant.id" x-text="plant.name"></option>
                                             </template>
                                         </select>
-                                    </div>
+                                    </div> --}}
                                 </div>
                             </template>
 
-                            {{-- Case 2: Perbaikan/Modifikasi (Pilih Mesin yang Ada) --}}
-                            <template x-if="form.category !== 'Pemasangan Mesin'">
-                                <div>
-                                    <label class="block text-xs font-bold text-blue-700 uppercase mb-2">Pilih
-                                        Mesin</label>
-                                    <select x-model="form.machine_id" :disabled="!form.plant_id"
-                                        class="w-full rounded-xl border-blue-200 py-3 px-4 bg-white font-bold text-slate-700 disabled:bg-slate-100 disabled:text-slate-400">
-                                        <option value=""
-                                            x-text="isLoadingMachines ? 'Loading...' : '-- Pilih Mesin --'"></option>
-                                        <template x-for="machine in machinesList" :key="machine.id">
-                                            <option :value="machine.id" x-text="machine.name"></option>
-                                        </template>
-                                    </select>
-                                    <p x-show="!form.plant_id" class="text-xs text-blue-400 mt-2 font-medium">*Pilih
-                                        Lokasi (Plant) terlebih dahulu</p>
+                            {{-- B. JIKA KATEGORI = PERBAIKAN / MODIFIKASI (PILIH MESIN LAMA) --}}
+                            <template x-if="!isNewMachineInstallation">
+                                <div class="space-y-4">
+
+                                    {{-- [LOGIKA KHUSUS MT/PE] --}}
+                                    {{-- Dropdown ini HANYA muncul jika User memilih Kategori 'Pilih Mesin' DAN Lokasinya MT/PE --}}
+                                    <template x-if="isSpecialDepartment">
+                                        <div class="bg-amber-50 p-4 rounded-xl border border-amber-100 mb-2">
+                                            <label class="block text-xs font-bold text-amber-700 uppercase mb-2">
+                                                Pilih Plant Asal Mesin <span class="text-red-500">*</span>
+                                            </label>
+                                            <select x-model="machine_origin_plant_id"
+                                                class="w-full rounded-xl border-amber-200 py-3 px-4 bg-white font-bold text-slate-700 focus:border-amber-500 focus:ring-amber-500">
+                                                <option value="">-- Pilih Plant Pemilik Mesin --</option>
+                                                <template x-for="plant in plantsList" :key="plant.id">
+                                                    <option :value="plant.id" x-text="plant.name"></option>
+                                                </template>
+                                            </select>
+                                            <p class="text-[10px] text-amber-600 mt-2 italic">
+                                                <span class="font-bold">Info:</span> Karena Anda berada di Departemen
+                                                Support (MT/PE), silakan pilih lokasi asal mesin yang sedang dikerjakan.
+                                            </p>
+                                        </div>
+                                    </template>
+
+                                    {{-- Dropdown Pilih Mesin --}}
+                                    <div>
+                                        <label class="block text-xs font-bold text-blue-700 uppercase mb-2">Pilih Mesin
+                                            <span class="text-red-500">*</span></label>
+
+                                        {{-- Disable logic: --}}
+                                        {{-- 1. Jika Lokasi Belum Dipilih --}}
+                                        {{-- 2. ATAU Jika Lokasi MT/PE TAPI Origin Plant Belum Dipilih --}}
+                                        <select x-model="form.machine_id"
+                                            :disabled="!form.plant_id || (isSpecialDepartment && !machine_origin_plant_id)"
+                                            class="w-full rounded-xl border-blue-200 py-3 px-4 bg-white font-bold text-slate-700 disabled:bg-slate-100 disabled:text-slate-400 cursor-pointer disabled:cursor-not-allowed">
+
+                                            <option value=""
+                                                x-text="isLoadingMachines ? 'Loading...' : '-- Pilih Mesin --'">
+                                            </option>
+
+                                            {{-- Loop machinesList (Sudah difilter otomatis di JS) --}}
+                                            <template x-for="machine in machinesList" :key="machine.id">
+                                                <option :value="machine.id" x-text="machine.name"></option>
+                                            </template>
+                                        </select>
+
+                                        {{-- Helper Text untuk UX --}}
+                                        <div class="mt-2">
+                                            <p x-show="!form.plant_id" class="text-xs text-slate-400">
+                                                &larr; Pilih Lokasi (Plant) di atas terlebih dahulu.
+                                            </p>
+                                            <p x-show="isSpecialDepartment && !machine_origin_plant_id"
+                                                class="text-xs text-amber-500 font-bold animate-pulse">
+                                                &uarr; Pilih Plant Asal Mesin terlebih dahulu.
+                                            </p>
+                                            <p x-show="machinesList.length === 0 && (form.plant_id && (!isSpecialDepartment || machine_origin_plant_id))"
+                                                class="text-xs text-red-400">
+                                                (Tidak ada data mesin ditemukan di lokasi ini)
+                                            </p>
+                                        </div>
+                                    </div>
                                 </div>
                             </template>
                         </div>
