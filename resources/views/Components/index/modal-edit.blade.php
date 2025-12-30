@@ -5,12 +5,15 @@
         <div class="flex min-h-full items-center justify-center p-4">
             <div
                 class="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-visible transform transition-all">
+
+                {{-- Header --}}
                 <div
                     class="bg-gradient-to-r from-[#1E3A5F] to-[#2d5285] px-8 py-6 rounded-t-[2.5rem] flex justify-between items-center">
                     <h3 class="text-white font-extrabold text-xl">Update Status</h3>
                     <button @click="showEditModal = false"
                         class="text-white/60 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition">&times;</button>
                 </div>
+
                 <form x-bind:action="'/fh/' + editForm.id + '/update-status'" method="POST" class="p-8 space-y-6">
                     @csrf @method('PUT')
 
@@ -35,8 +38,8 @@
                                 <div @click="toggleTech(tech.id)"
                                     class="flex items-center gap-3 p-2.5 hover:bg-blue-50 cursor-pointer rounded-lg transition group">
                                     <div class="w-5 h-5 border rounded flex items-center justify-center transition"
-                                        :class="editForm.selectedTechs.includes(tech.id) ?
-                                            'bg-blue-600 border-blue-600' : 'bg-white border-slate-300'">
+                                        :class="editForm.selectedTechs.includes(tech.id) ? 'bg-blue-600 border-blue-600' :
+                                            'bg-white border-slate-300'">
                                         <svg x-show="editForm.selectedTechs.includes(tech.id)"
                                             class="w-3 h-3 text-white" fill="none" stroke="currentColor"
                                             viewBox="0 0 24 24">
@@ -50,6 +53,8 @@
                             </template>
                         </div>
                     </div>
+
+                    {{-- Selected Tags --}}
                     <div class="flex flex-wrap gap-2" x-show="editForm.selectedTechs.length > 0">
                         <template x-for="id in editForm.selectedTechs" :key="id">
                             <span
@@ -62,9 +67,10 @@
                         </template>
                     </div>
 
-                    {{-- Status --}}
+                    {{-- Status Dropdown --}}
                     <div>
                         <label class="block text-sm font-bold text-slate-700 mb-2">Status</label>
+                        {{-- Hapus ID statusSelect, cukup andalkan x-model --}}
                         <select name="status" x-model="editForm.status"
                             class="w-full rounded-xl border-slate-200 text-sm py-3 px-4 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition font-medium text-slate-700">
                             <option value="pending">Pending</option>
@@ -73,6 +79,22 @@
                             <option value="cancelled">Cancelled</option>
                         </select>
                     </div>
+
+                    {{-- PERBAIKAN: Input Cancellation Note (Murni Alpine JS) --}}
+                    <div x-show="editForm.status === 'cancelled'" x-transition:enter="transition ease-out duration-300"
+                        x-transition:enter-start="opacity-0 transform -translate-y-2"
+                        x-transition:enter-end="opacity-100 transform translate-y-0" class="mb-4">
+                        <label class="font-bold text-sm text-red-600">Alasan Pembatalan <span
+                                class="text-red-500">*</span></label>
+
+                        {{-- Tambahkan :required agar validasi browser jalan otomatis --}}
+                        {{-- Tambahkan x-model jika ingin sinkron dengan object JS, atau biarkan name untuk submit form biasa --}}
+                        <textarea name="completion_note" x-model="editForm.completion_note" :required="editForm.status === 'cancelled'"
+                            class="w-full border p-2 rounded border-red-300 focus:ring-red-500 focus:border-red-500"
+                            placeholder="Contoh: Stok sparepart kosong / Laporan duplikat..." rows="3"></textarea>
+                    </div>
+
+                    {{-- Input Completed Note --}}
                     <div x-show="editForm.status === 'completed'" x-transition:enter="transition ease-out duration-300"
                         x-transition:enter-start="opacity-0 transform -translate-y-2"
                         x-transition:enter-end="opacity-100 transform translate-y-0"
@@ -82,9 +104,11 @@
                             Catatan Penyelesaian <span class="text-green-600 font-normal">(Opsional)</span>
                         </label>
 
-                        <textarea x-model="editForm.note" rows="3" placeholder="Contoh: Mesin sudah diganti bearing baru..."
-                            class="w-full rounded-xl border-green-200 focus:border-green-500 focus:ring-green-500 text-sm"></textarea>
+                        <textarea name="note" x-model="editForm.note" rows="3"
+                            placeholder="Contoh: Mesin sudah diganti bearing baru..."
+                            class="w-full rounded-xl border-green-200 focus:border-green-500 focus:ring-green-500 text-sm bg-white"></textarea>
                     </div>
+
                     {{-- Dates --}}
                     <div x-show="editForm.status == 'in_progress' || editForm.status == 'completed'" x-transition>
                         <label class="block text-sm font-bold text-slate-700 mb-2">Tanggal Mulai</label>
@@ -93,8 +117,7 @@
                             placeholder="YYYY-MM-DD">
                     </div>
                     <div x-show="editForm.status == 'completed'" x-transition>
-                        <label class="block text-sm font-bold text-emerald-700 mb-2">Tanggal Selesai
-                            (Actual)</label>
+                        <label class="block text-sm font-bold text-emerald-700 mb-2">Tanggal Selesai (Actual)</label>
                         <input type="text" name="actual_completion_date" x-model="editForm.actual_completion_date"
                             class="w-full rounded-xl border-emerald-200 bg-emerald-50 text-emerald-800 text-sm py-3 px-4 date-picker-edit font-bold focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition"
                             placeholder="YYYY-MM-DD" :required="editForm.status == 'completed'">
@@ -108,3 +131,5 @@
         </div>
     </div>
 </template>
+
+{{-- SCRIPT DI BAWAH SUDAH DIHAPUS KARENA TIDAK PERLU --}}
