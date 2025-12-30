@@ -1,5 +1,8 @@
 <template x-teleport="body">
-    <div x-show="showDetailModal" class="fixed inset-0 z-50 overflow-y-auto" style="display: none;">
+    {{-- PANGGIL KOMPONEN JS DI SINI --}}
+    <div x-data="facilityDetail" x-show="showDetailModal" @open-detail-modal.window="openModal($event.detail)"
+        class="fixed inset-0 z-50 overflow-y-auto" style="display: none;">
+
         <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" @click="showDetailModal = false">
         </div>
 
@@ -21,7 +24,6 @@
                 </div>
 
                 <div class="p-8 space-y-8 overflow-y-auto custom-scrollbar grow">
-
                     <div class="grid grid-cols-2 gap-8 text-sm">
                         <div>
                             <span
@@ -34,7 +36,6 @@
                                 class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-1">Lokasi</span>
                             <span class="font-bold text-slate-800 text-lg" x-text="ticket ? ticket.plant : ''"></span>
                         </div>
-
                         <div>
                             <span
                                 class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-1">NIK</span>
@@ -47,7 +48,6 @@
                             <span class="font-bold text-slate-800 text-lg"
                                 x-text="ticket && ticket.divisi_pelapor ? ticket.divisi_pelapor : '-'"></span>
                         </div>
-
                         <div>
                             <span
                                 class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-1">Kategori</span>
@@ -72,12 +72,12 @@
                             x-text="ticket ? ticket.description : ''"></div>
                     </div>
 
+                    {{-- Logic Completed --}}
                     <template x-if="ticket && ticket.status === 'completed'">
                         <div class="mt-4 bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
-                            <span class="block text-xs font-extrabold text-emerald-600 uppercase tracking-widest mb-3">
-                                Laporan Penyelesaian
-                            </span>
-
+                            <span
+                                class="block text-xs font-extrabold text-emerald-600 uppercase tracking-widest mb-3">Laporan
+                                Penyelesaian</span>
                             <div class="text-slate-700 leading-relaxed whitespace-pre-wrap font-medium mb-3"
                                 x-text="ticket.completion_note ? ticket.completion_note : '(Tidak ada catatan teknisi)'">
                             </div>
@@ -85,42 +85,29 @@
                             <template x-if="ticket.tanggal_selesai_indo">
                                 <div
                                     class="pt-3 border-t border-emerald-200/50 flex items-center text-xs text-emerald-700 font-semibold">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none"
-                                        viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
-                                    Diselesaikan pada:
-                                    <span class="ml-1" x-text="ticket.tanggal_selesai_indo"></span>
+                                    Diselesaikan pada: <span class="ml-1" x-text="ticket.tanggal_selesai_indo"></span>
                                 </div>
                             </template>
                         </div>
                     </template>
 
+                    {{-- Logic Cancelled --}}
                     <template x-if="ticket && ticket.status === 'cancelled'">
                         <div class="mt-4 bg-red-50 p-6 rounded-2xl border border-red-100">
                             <div class="flex items-start gap-3">
-                                <div class="shrink-0 text-red-500 mt-0.5">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20"
-                                        fill="currentColor">
-                                        <path fill-rule="evenodd"
-                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                                            clip-rule="evenodd" />
-                                    </svg>
-                                </div>
                                 <div class="grow">
                                     <span
-                                        class="block text-xs font-extrabold text-red-600 uppercase tracking-widest mb-2">
-                                        Alasan Pembatalan
-                                    </span>
+                                        class="block text-xs font-extrabold text-red-600 uppercase tracking-widest mb-2">Alasan
+                                        Pembatalan</span>
                                     <div class="text-slate-800 leading-relaxed whitespace-pre-wrap font-medium"
-                                        x-text="ticket.completion_note ? ticket.completion_note : 'Permintaan dibatalkan oleh Admin tanpa catatan spesifik.'">
+                                        x-text="ticket.completion_note ? ticket.completion_note : 'Dibatalkan tanpa catatan.'">
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </template>
 
+                    {{-- Foto --}}
                     <template x-if="ticket && ticket.photo_path">
                         <div>
                             <span
@@ -130,13 +117,6 @@
                                 class="block group relative overflow-hidden rounded-2xl max-w-sm border border-slate-200 shadow-sm">
                                 <img :src="'/storage/' + ticket.photo_path"
                                     class="w-full h-auto object-cover transition duration-500 group-hover:scale-110">
-                                <div
-                                    class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                                    <span
-                                        class="text-white font-bold px-4 py-2 bg-white/20 backdrop-blur-md rounded-lg shadow-lg border border-white/30">
-                                        Lihat Foto Asli
-                                    </span>
-                                </div>
                             </a>
                         </div>
                     </template>

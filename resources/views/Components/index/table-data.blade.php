@@ -204,7 +204,7 @@
                         {{-- Aksi Column --}}
                         <td class="px-6 py-5 align-top text-right">
                             <div class="flex justify-end gap-2">
-                                <button @click='ticket = @json($wo); showDetailModal = true'
+                                <button @click="$dispatch('open-detail-modal', {{ json_encode($wo) }})"
                                     class="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition border border-transparent hover:border-blue-100 flex-shrink-0">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -215,7 +215,7 @@
                                     </svg>
                                 </button>
                                 @if (Auth::user()?->role == 'fh.admin')
-                                    <button @click='openEditModal(@json($wo))'
+                                    <button @click="$dispatch('open-edit-modal', {{ json_encode($wo) }})"
                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition border border-transparent hover:border-amber-100 flex-shrink-0">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
