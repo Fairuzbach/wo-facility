@@ -7,97 +7,103 @@ use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithStyles;
-use Maatwebsite\Excel\Concerns\WithTitle;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Style\Border;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
 
-class FacilitiesExport implements FromCollection, WithHeadings, WithMapping, ShouldAutoSize, WithStyles, WithTitle
+class FacilitiesExport implements FromCollection, WithHeadings, WithMapping, ShouldAutoSize, WithStyles
 {
-    protected $workOrders;
+    protected $data;
 
-    public function __construct($workOrders)
+    public function __construct($data)
     {
-        $this->workOrders = $workOrders;
+        $this->data = $data;
     }
 
+    /**
+     * @return \Illuminate\Support\Collection
+     */
     public function collection()
     {
-        return $this->workOrders;
+        return $this->data;
     }
 
-    public function headings(): array
-    {
-        return [
-            'Ticket No',
-            'Date',
-            'Requester',
-            'Plant',
-            'Machine',
-            'Category',
-            'Description',
-            'Status',
-            'Technicians (PIC)',
-            'Start Date',
-            'Completion Date'
-        ];
-    }
-
+    // 1. MAPPING DATA
     public function map($wo): array
     {
-        // Gabungkan nama teknisi jadi satu string dipisah koma
-        $techNames = $wo->technicians->pluck('name')->implode(', ');
+        // A. Logika Plant Asal Mesin
+        $originPlant = '-';
+        if ($wo->machine && $wo->machine->plant) {
+            $originPlant = $wo->machine->plant->name;
+        }
+
+        // B. Logika Status Label
+        // Default: Ambil status utama dan rapikan (contoh: in_progress -> In Progress)
+        $statusLabel = ucfirst(str_replace('_', ' ', $wo->status));
+
+        // [UPDATE] Override jika status internal adalah waiting_spv
+        if ($wo->internal_status === 'waiting_spv') {
+            $statusLabel = 'Waiting Approval';
+        }
 
         return [
             $wo->ticket_num,
-            $wo->report_date,
+            $wo->created_at ? $wo->created_at->format('d-m-Y H:i') : '-',
             $wo->requester_name,
-            $wo->plant,
-            $wo->machine->name ?? '-',
+            $wo->requester_division ?? '-',
+            $wo->plant ?? '-',
+            $wo->machine ? $wo->machine->name : '-',
+            $originPlant,
             $wo->category,
             $wo->description,
-            strtoupper(str_replace('_', ' ', $wo->status)),
-            $techNames ?: '-', // Jika kosong isi strip
-            $wo->start_date,
-            $wo->actual_completion_date
+
+            // Menggunakan Label Status yang sudah diolah di atas
+            $statusLabel,
+
+            $wo->technicians->pluck('name')->join(', '),
+            $wo->actual_completion_date ? \Carbon\Carbon::parse($wo->actual_completion_date)->format('d-m-Y H:i') : '-',
+            $wo->completion_note ?? '-',
         ];
     }
 
+    // 2. JUDUL HEADER
+    public function headings(): array
+    {
+        return [
+            'No. Tiket',
+            'Tgl Lapor',
+            'Pelapor',
+            'Divisi Pelapor',
+            'Lokasi Pengerjaan',
+            'Mesin',
+            'Plant Asal Mesin',
+            'Kategori',
+            'Deskripsi Masalah',
+            'Status',
+            'Teknisi',
+            'Tgl Selesai',
+            'Catatan Penyelesaian / Pembatalan'
+        ];
+    }
+
+    // 3. STYLING
     public function styles(Worksheet $sheet)
     {
-        // Define border style
-        $borderStyle = [
-            'borders' => [
-                'allBorders' => [
-                    'borderStyle' => Border::BORDER_THIN,
-                    'color' => ['rgb' => '000000'],
-                ],
-            ],
-        ];
+        $lastRow = $sheet->getHighestRow();
+        $lastColumn = 'M'; // Total 13 Kolom
 
-        // Header styling
-        $headerStyle = array_merge($borderStyle, [
-            'font' => [
-                'bold' => true,
-                'size' => 12,
-                'color' => ['rgb' => 'FFFFFF'],
-            ],
-            'fill' => [
-                'fillType' => Fill::FILL_SOLID,
-                'startColor' => ['rgb' => '1E3A5F'],
-            ],
-            'alignment' => [
-                'horizontal' => Alignment::HORIZONTAL_CENTER,
-                'vertical' => Alignment::VERTICAL_CENTER,
-                'wrapText' => true,
-            ],
+        // Header Style
+        $sheet->getStyle("A1:{$lastColumn}1")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1E3A5F']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
 
-        // Data row styling
-        $dataStyle = array_merge($borderStyle, [
-            'font' => [
-                'size' => 11,
+        // Data Style
+        $sheet->getStyle("A1:{$lastColumn}{$lastRow}")->applyFromArray([
+            'borders' => [
+                'allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => '000000']],
             ],
             'alignment' => [
                 'vertical' => Alignment::VERTICAL_TOP,
@@ -105,49 +111,6 @@ class FacilitiesExport implements FromCollection, WithHeadings, WithMapping, Sho
             ],
         ]);
 
-        // Get the highest row with data
-        $highestRow = $sheet->getHighestRow();
-
-        // Apply header style to first row
-        $sheet->getStyle('1:1')->applyFromArray($headerStyle);
-
-        // Apply alternating row colors for data rows
-        for ($row = 2; $row <= $highestRow; $row++) {
-            if ($row % 2 == 0) {
-                // Even rows - light gray background
-                $sheet->getStyle($row . ':' . $row)->applyFromArray(array_merge($dataStyle, [
-                    'fill' => [
-                        'fillType' => Fill::FILL_SOLID,
-                        'startColor' => ['rgb' => 'F3F4F6'],
-                    ],
-                ]));
-            } else {
-                // Odd rows - white background
-                $sheet->getStyle($row . ':' . $row)->applyFromArray($dataStyle);
-            }
-        }
-
-        // Set row height for header
-        $sheet->getRowDimension(1)->setRowHeight(25);
-
-        // Set column widths
-        $sheet->getColumnDimension('A')->setWidth(15);
-        $sheet->getColumnDimension('B')->setWidth(12);
-        $sheet->getColumnDimension('C')->setWidth(15);
-        $sheet->getColumnDimension('D')->setWidth(12);
-        $sheet->getColumnDimension('E')->setWidth(15);
-        $sheet->getColumnDimension('F')->setWidth(12);
-        $sheet->getColumnDimension('G')->setWidth(25);
-        $sheet->getColumnDimension('H')->setWidth(15);
-        $sheet->getColumnDimension('I')->setWidth(18);
-        $sheet->getColumnDimension('J')->setWidth(12);
-        $sheet->getColumnDimension('K')->setWidth(12);
-
         return [];
-    }
-
-    public function title(): string
-    {
-        return 'Facilities Work Orders';
     }
 }

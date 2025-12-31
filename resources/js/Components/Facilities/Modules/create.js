@@ -1,7 +1,5 @@
 export default () => ({
-    // =========================================================================
     // 1. STATE VARIABLES
-    // =========================================================================
     showCreateModal: false,
     isSubmitting: false,
     isLoadingMachines: false,
@@ -18,7 +16,7 @@ export default () => ({
     addedEmployees: [],
 
     // Variabel Root
-    machine_origin_plant_id: '', // <--- PENTING: Untuk Plant Asal (MT/PE)
+    machine_origin_plant_id: '', 
     target_plant_id: '',
     new_machine_name: '',
 
@@ -35,10 +33,7 @@ export default () => ({
         photo: null
     },
 
-    // =========================================================================
     // 2. GETTERS (LOGIKA UI DINAMIS)
-    // =========================================================================
-
     get plantsList() {
         return this.plantsData || [];
     },
@@ -49,7 +44,7 @@ export default () => ({
         return this.plantsData.find(p => p.id == this.form.plant_id);
     },
 
-    // [LOGIKA BARU] Cek apakah Lokasi yang dipilih adalah MT atau PE
+    // Cek apakah Lokasi yang dipilih adalah MT atau PE
     get isSpecialDepartment() {
         const p = this.selectedPlant;
         if (!p) return false;
@@ -86,10 +81,7 @@ export default () => ({
         return this.form.category === 'Pemasangan Mesin';
     },
 
-    // =========================================================================
     // 3. METHODS
-    // =========================================================================
-
     init() {
         // Reset jika lokasi utama berubah
         this.$watch('form.plant_id', () => {

@@ -151,7 +151,8 @@ class FacilitiesController extends Controller
         // --- 5. GET DATA & PAGING ---
         $workOrders = $query->with(['user', 'technicians', 'machine'])
             ->latest()
-            ->paginate(10)
+            ->paginate(7)
+            ->onEachSide(1)
             ->withQueryString();
 
         $pageIds = $workOrders->pluck('id')->toArray();
@@ -185,57 +186,102 @@ class FacilitiesController extends Controller
     // --- DASHBOARD (ADMIN STATS) ---
     public function dashboard(Request $request)
     {
+        // Cek Role
         if (!Auth::check() || !in_array(Auth::user()->role, ['fh.admin', 'super.admin'])) {
             abort(403);
         }
 
-        $query = WorkOrderFacilities::where('status', '!=', 'cancelled');
+        $query = WorkOrderFacilities::query();
+
+        // [PERBAIKAN 1] Inisialisasi variabel agar tidak Undefined saat compact()
         $selectedMonth = null;
+
+        // Gantt defaults
         $ganttStartDate = now()->subDays(7);
         $ganttTotalDays = 15;
+        $isGanttDefault = true; // Penanda apakah pakai default
 
+        // 1. FILTER LOGIC
         if ($request->filled('month')) {
             $selectedMonth = $request->month;
             try {
                 $start = Carbon::createFromFormat('Y-m', $selectedMonth)->startOfMonth();
                 $end = Carbon::createFromFormat('Y-m', $selectedMonth)->endOfMonth();
                 $query->whereDate('created_at', '>=', $start)->whereDate('created_at', '<=', $end);
+
                 $ganttStartDate = $start;
                 $ganttTotalDays = $start->daysInMonth;
+                $isGanttDefault = false;
             } catch (\Exception $e) {
             }
         } elseif ($request->filled('start_date') && $request->filled('end_date')) {
             $query->whereDate('created_at', '>=', $request->start_date)
                 ->whereDate('created_at', '<=', $request->end_date);
-        } else {
-            $query->take(100);
+
+            // Opsional: Sesuaikan gantt dengan range tanggal filter
+            try {
+                $start = Carbon::parse($request->start_date);
+                $end = Carbon::parse($request->end_date);
+                $ganttStartDate = $start;
+                $ganttTotalDays = $start->diffInDays($end) + 1;
+                $isGanttDefault = false;
+            } catch (\Exception $e) {
+            }
         }
 
-        $workOrders = $query->latest()->get();
+        // =========================================================================
+        // A. DATA UNTUK STATS & CHART (Ambil Semua Data menggunakan get())
+        // =========================================================================
+        $allData = (clone $query)->latest()->get();
 
-        $countTotal = $workOrders->count();
-        $countPending = $workOrders->where('status', 'pending')->count();
-        $countProgress = $workOrders->where('status', 'in_progress')->count();
-        $countDone = $workOrders->where('status', 'completed')->count();
+        // 1. Total: Filter 'cancelled' secara eksplisit
+        $countTotal = $allData->filter(function ($item) {
+            return strtolower($item->status) !== 'cancelled';
+        })->count();
 
-        $catData = $workOrders->groupBy('category')->map->count();
-        $chartCatLabels = $catData->keys()->toArray();
-        $chartCatValues = $catData->values()->toArray();
+        // 2. Counter Status Lainnya
+        $countPending   = $allData->where('status', 'pending')->count();
+        $countProgress  = $allData->where('status', 'in_progress')->count();
+        $countDone      = $allData->where('status', 'completed')->count();
 
-        $statusData = $workOrders->groupBy('status')->map->count();
-        $chartStatusLabels = $statusData->keys()->toArray();
-        $chartStatusValues = $statusData->values()->toArray();
+        // 3. Hitung Waiting Approval
+        $countWaitingSpv = $allData->filter(function ($wo) {
+            return in_array($wo->internal_status, ['waiting_spv', 'waiting_facility_approval']);
+        })->count();
 
-        $plantData = $workOrders->groupBy('plant')->map->count();
-        $chartPlantLabels = $plantData->keys()->toArray();
-        $chartPlantValues = $plantData->values()->toArray();
+        // 4. Data untuk Chart.js
+        $catData    = $allData->groupBy('category')->map->count();
+        $statusData = $allData->groupBy('status')->map->count();
+        $plantData  = $allData->groupBy('plant')->map->count();
 
-        $periodTotal = $workOrders->count();
-        $periodCompleted = $workOrders->where('status', 'completed')->count();
-        $completionPct = $periodTotal ? round(($periodCompleted / $periodTotal) * 100, 1) : 0;
+        $techData = [];
+        foreach ($allData as $wo) {
+            if ($wo->technicians) {
+                foreach ($wo->technicians as $tech) {
+                    $techData[$tech->name] = ($techData[$tech->name] ?? 0) + 1;
+                }
+            }
+        }
+        arsort($techData);
 
-        // GANTT CHART LOGIC
-        $groupedGantt = $workOrders->groupBy('category')->map(function ($items, $category) {
+        $chartData = [
+            'catLabels'    => $catData->keys()->toArray(),
+            'catValues'    => $catData->values()->toArray(),
+            'statusLabels' => $statusData->keys()->toArray(),
+            'statusValues' => $statusData->values()->toArray(),
+            'plantLabels'  => $plantData->keys()->toArray(),
+            'plantValues'  => $plantData->values()->toArray(),
+            'techLabels'   => collect($techData)->keys()->toArray(),
+            'techValues'   => collect($techData)->values()->toArray(),
+        ];
+
+        // Completion Rate
+        $periodTotal     = $countTotal;
+        $periodCompleted = $countDone;
+        $completionPct   = $periodTotal ? round(($periodCompleted / $periodTotal) * 100, 1) : 0;
+
+        // Gantt Chart Logic (Pakai $allData)
+        $groupedGantt = $allData->groupBy('category')->map(function ($items, $category) {
             $minStart = $items->min(fn($i) => $i->start_date ? Carbon::parse($i->start_date) : $i->created_at);
             $maxEnd   = $items->max(fn($i) => $i->actual_completion_date ?? $i->target_completion_date);
             $hasDelay = $items->contains(function ($i) {
@@ -285,20 +331,10 @@ class FacilitiesController extends Controller
             ];
         });
 
-        $techData = [];
-        foreach ($workOrders as $wo) {
-            if ($wo->technicians && $wo->technicians->count() > 0) {
-                foreach ($wo->technicians as $tech) {
-                    if (!isset($techData[$tech->name])) {
-                        $techData[$tech->name] = 0;
-                    }
-                    $techData[$tech->name]++;
-                }
-            }
-        }
-        arsort($techData);
-        $chartTechLabels = collect($techData)->keys()->toArray();
-        $chartTechValues = collect($techData)->values()->toArray();
+        // =========================================================================
+        // B. DATA UNTUK TABEL (Paginate)
+        // =========================================================================
+        $workOrders = $query->latest()->paginate(20)->onEachSide(1);
 
         return view('Division.Facilities.Dashboard', compact(
             'workOrders',
@@ -306,19 +342,13 @@ class FacilitiesController extends Controller
             'countPending',
             'countProgress',
             'countDone',
-            'chartCatLabels',
-            'chartCatValues',
-            'chartStatusLabels',
-            'chartStatusValues',
-            'chartPlantLabels',
-            'chartPlantValues',
-            'chartTechLabels',
-            'chartTechValues',
+            'countWaitingSpv',
             'completionPct',
-            'selectedMonth',
+            'selectedMonth', // <-- Variabel ini sekarang aman karena sudah di-init null
             'groupedGantt',
             'ganttStartDate',
-            'ganttTotalDays'
+            'ganttTotalDays',
+            'chartData'
         ));
     }
 
