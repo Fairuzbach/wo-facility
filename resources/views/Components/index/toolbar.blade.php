@@ -101,8 +101,9 @@
             @endauth
 
             {{-- 2. TOMBOL EXPORT (Hanya muncul jika Login) --}}
-            <button type="button" x-show="isLoggedIn" @click="submitExport()" style="display: none;"
-                class="px-5 py-3 rounded-2xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 hover:text-green-600 transition flex items-center gap-2 bg-white shadow-sm hover:shadow">
+            <button type="button" x-show="isLoggedIn" @click="submitExport()"
+                class="px-5 py-3 rounded-2xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 hover:text-green-600 transition flex items-center gap-2 bg-white shadow-sm hover:shadow"
+                x-cloak> {{-- Gunakan x-cloak agar tidak kedip saat loading --}}
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>

@@ -1,5 +1,4 @@
 // resources/js/Components/Facilities/state.js
-
 export const createState = () => ({
     // Auth
     isLoggedIn: window.facilitiesConfig?.isLoggedIn || false,

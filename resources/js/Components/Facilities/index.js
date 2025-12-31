@@ -1,5 +1,4 @@
 // resources/js/Components/Facilities/index.js
-
 import { createState } from './state';
 import { FacilitiesAPI } from './Services/api';
 
